@@ -2,9 +2,11 @@ const express = require('express');
 const https   = require('https');
 const path    = require('path');
 const fs      = require('fs');
+const crypto  = require('crypto');
 
 const app  = express();
 const PORT = 3000;
+app.use(express.json({ limit: '10mb' }));
 
 // ── Clé API Mistral ────────────────────────────────────────────────────────────
 // Plus AUCUNE clé en dur dans le code source. Deux façons de la fournir :
@@ -36,30 +38,257 @@ if (!CONFIG.apiKey) {
   process.exit(1);
 }
 
-app.use(express.json({ limit: '10mb' }));
+// ── PIN admin ────────────────────────────────────────────────────────────────
+// Avant : le PIN était une constante en clair dans WineSelect.html, lisible
+// par n'importe qui via F12 (Inspecter / Sources). Il est maintenant vérifié
+// uniquement côté serveur, sur le même principe que la clé API Mistral.
+function loadAdminPin() {
+  if (process.env.ADMIN_PIN) return process.env.ADMIN_PIN.trim();
+  const pinFile = path.join(__dirname, 'admin-pin.txt');
+  if (fs.existsSync(pinFile)) {
+    const pin = fs.readFileSync(pinFile, 'utf-8').trim();
+    if (pin) return pin;
+  }
+  return null;
+}
+const DEFAULT_ADMIN_PIN = '2024';
+const ADMIN_PIN = loadAdminPin() || DEFAULT_ADMIN_PIN;
+if (ADMIN_PIN === DEFAULT_ADMIN_PIN) {
+  console.warn('\n⚠️  PIN admin par défaut (' + DEFAULT_ADMIN_PIN + ') encore utilisé.');
+  console.warn('   À changer avant tout déploiement en magasin : crée un fichier');
+  console.warn('   "admin-pin.txt" à côté de serveur.js avec ton propre code dedans.\n');
+}
+
+// Limite le nombre d'essais de PIN pour empêcher un essai automatisé de
+// toutes les combinaisons à 4 chiffres (10 000 possibilités, testables en
+// quelques secondes sans cette limite). Compteur en mémoire, réinitialisé
+// au redémarrage du serveur — suffisant pour une borne à usage local.
+const pinAttempts = new Map(); // ip -> { count, lockedUntil }
+const PIN_MAX_ATTEMPTS = 5;
+const PIN_LOCKOUT_MS = 60 * 1000;
+
+// ── Session admin (token) ───────────────────────────────────────────────────
+// Avant : le PIN protégeait l'écran Admin côté React, mais les routes REST
+// d'écriture (/api/profiles, /api/global-ratings, /api/stock-overrides)
+// acceptaient n'importe quel POST sans aucune vérification — quelqu'un avec
+// un accès réseau à la borne pouvait écraser ces fichiers sans jamais taper
+// le PIN. On délivre maintenant un token à la validation du PIN, à fournir
+// en header X-Admin-Token sur les routes qui doivent rester admin-only.
+// (profiles/global-ratings restent ouvertes en écriture : elles sont
+// alimentées en continu par les clients eux-mêmes, pas seulement l'admin.)
+const adminTokens = new Map(); // token -> expiresAt
+const ADMIN_TOKEN_TTL_MS = 2 * 60 * 60 * 1000; // 2h, large pour une session gérant
+
+function issueAdminToken() {
+  const token = crypto.randomBytes(24).toString('hex');
+  adminTokens.set(token, Date.now() + ADMIN_TOKEN_TTL_MS);
+  return token;
+}
+
+function requireAdminToken(req, res, next) {
+  const token = req.get('X-Admin-Token') || '';
+  const expiresAt = adminTokens.get(token);
+  if (!expiresAt || expiresAt < Date.now()) {
+    adminTokens.delete(token);
+    return res.status(401).json({ ok: false, error: 'Session admin expirée ou invalide — reconnecte-toi.' });
+  }
+  next();
+}
+
+// Nettoyage périodique des tokens expirés (mémoire, remise à zéro au redémarrage).
+setInterval(() => {
+  const now = Date.now();
+  for (const [token, expiresAt] of adminTokens) {
+    if (expiresAt < now) adminTokens.delete(token);
+  }
+}, 10 * 60 * 1000).unref();
+
+app.post('/api/admin-auth', (req, res) => {
+  const ip = req.ip || req.socket.remoteAddress || 'unknown';
+  const now = Date.now();
+  const entry = pinAttempts.get(ip) || { count: 0, lockedUntil: 0 };
+
+  if (entry.lockedUntil > now) {
+    const waitSec = Math.ceil((entry.lockedUntil - now) / 1000);
+    return res.status(429).json({ ok: false, error: 'Trop d\'essais. Réessaie dans ' + waitSec + 's.' });
+  }
+
+  const pin = (req.body && req.body.pin) ? String(req.body.pin) : '';
+  if (pin === ADMIN_PIN) {
+    pinAttempts.delete(ip);
+    return res.json({ ok: true, token: issueAdminToken() });
+  }
+
+  entry.count += 1;
+  if (entry.count >= PIN_MAX_ATTEMPTS) {
+    entry.lockedUntil = now + PIN_LOCKOUT_MS;
+    entry.count = 0;
+  }
+  pinAttempts.set(ip, entry);
+  res.json({ ok: false });
+});
+
 app.use(express.static(path.join(__dirname)));
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'WineSelect.html')));
 
+// ── Limitation de débit sur les routes qui appellent l'API Mistral ─────────
+// Chaque appel à /sommelier ou /selection-accord consomme du budget API,
+// sans frein jusqu'ici. Une boucle de requêtes (bug client, page qui se
+// recharge en boucle, borne exposée au-delà du réseau local) pouvait donc
+// consommer le budget sans qu'on s'en aperçoive. Fenêtre glissante simple,
+// en mémoire — remise à zéro au redémarrage, suffisant pour une borne à
+// usage local. 30/min est large pour un usage normal (quelques messages
+// par session de chat) tout en bloquant un emballement.
+const rateLimitHits = new Map(); // ip -> [timestamps des requêtes dans la dernière minute]
+function rateLimit(maxPerMinute) {
+  return (req, res, next) => {
+    const ip = req.ip || req.socket.remoteAddress || 'unknown';
+    const now = Date.now();
+    const windowStart = now - 60 * 1000;
+    const hits = (rateLimitHits.get(ip) || []).filter(t => t > windowStart);
+    if (hits.length >= maxPerMinute) {
+      console.warn('⚠️  Limite de débit atteinte pour', ip, '(' + hits.length + ' requêtes/min sur ' + req.path + ')');
+      return res.status(429).json({ error: 'Trop de requêtes. Réessaie dans quelques instants.' });
+    }
+    hits.push(now);
+    rateLimitHits.set(ip, hits);
+    next();
+  };
+}
+// Nettoyage périodique pour ne pas accumuler indéfiniment des entrées IP
+// devenues inactives (mémoire, pas fichier — pas de risque de corruption).
+setInterval(() => {
+  const cutoff = Date.now() - 60 * 1000;
+  for (const [ip, hits] of rateLimitHits) {
+    const fresh = hits.filter(t => t > cutoff);
+    if (fresh.length) rateLimitHits.set(ip, fresh);
+    else rateLimitHits.delete(ip);
+  }
+}, 10 * 60 * 1000).unref();
+
+// ── Persistance serveur (data/*.json) ───────────────────────────────────────
+// Sauvegarde de secours des données client (profils, notes, stocks importés).
+// Le front continue de fonctionner en priorité avec localStorage (rapide,
+// aucune dépendance réseau pour l'usage normal) ; ces routes servent de
+// copie de sûreté et de point de restauration en cas de borne réinstallée
+// ou de cache navigateur vidé — voir bouton "Restaurer depuis le serveur"
+// dans Admin > Config.
+const DATA_DIR = path.join(__dirname, 'data');
+if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+
+function dataFile(name) { return path.join(DATA_DIR, name + '.json'); }
+
+function readJSON(name, fallback) {
+  try {
+    const raw = fs.readFileSync(dataFile(name), 'utf-8');
+    return JSON.parse(raw);
+  } catch (e) {
+    return fallback;
+  }
+}
+
+// Écriture atomique : on écrit dans un fichier temporaire puis on renomme.
+// Ça évite un fichier corrompu si la borne s'éteint pendant l'écriture.
+function writeJSONAtomic(name, data) {
+  const tmp = dataFile(name) + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(data), 'utf-8');
+  fs.renameSync(tmp, dataFile(name));
+}
+
+function makePersistedRoute(name, opts) {
+  opts = opts || {};
+  const fallback = opts.defaultValue !== undefined ? opts.defaultValue : {};
+  const writeMiddlewares = opts.protect ? [requireAdminToken] : [];
+
+  app.get('/api/' + name, (req, res) => {
+    res.json(readJSON(name, fallback));
+  });
+  app.post('/api/' + name, ...writeMiddlewares, (req, res) => {
+    try {
+      writeJSONAtomic(name, req.body !== undefined ? req.body : fallback);
+      if (opts.onWrite) opts.onWrite();
+      res.json({ ok: true });
+    } catch (e) {
+      console.error('❌ Écriture data/' + name + '.json impossible :', e.message);
+      res.status(500).json({ ok: false, error: e.message });
+    }
+  });
+}
+
+makePersistedRoute('profiles');         // ws_profiles — écriture continue par les clients, pas admin-only
+makePersistedRoute('global-ratings');   // ws_global_ratings — idem
+// stock-overrides : alimenté UNIQUEMENT depuis Admin > Config (import CSV /
+// mise en avant), donc protégé par token admin. onWrite réapplique aussitôt
+// les overrides sur le catalogue servi à Gabriel (voir applyStockOverrides).
+makePersistedRoute('stock-overrides', {
+  protect: true,
+  defaultValue: [],
+  onWrite: () => applyStockOverrides(),
+});
+
 // ── Chargement du catalogue ───────────────────────────────────────────────────
-let WINES_CATALOG = [];
+// BASE_CATALOG = données brutes de wines-data.js, jamais modifiées en mémoire.
+// WINES_CATALOG = BASE_CATALOG + overrides stock/prix/mise en avant importés
+// depuis Admin > Config (data/stock-overrides.json). C'est TOUJOURS
+// WINES_CATALOG qu'utilisent /sommelier et /selection-accord, pour que
+// Gabriel raisonne sur les mêmes prix/stock que ceux affichés sur les
+// cartes côté client après un import CSV — avant ce correctif, un import
+// mettait à jour l'affichage mais Gabriel continuait de filtrer avec les
+// anciens prix de wines-data.js (budget/stock potentiellement incohérents).
+let BASE_CATALOG   = [];
+let WINES_CATALOG  = [];
 
 function loadCatalog() {
+  // Le catalogue vit désormais dans son propre fichier (wines-data.js),
+  // séparé de WineSelect.html. Ça permet à chaque magasin d'avoir son
+  // propre catalogue sans dupliquer toute l'application : WineSelect.html
+  // et serveur.js restent identiques partout et se mettent à jour via le
+  // système auto-update habituel ; seul wines-data.js change d'un magasin
+  // à l'autre et n'est PAS écrasé par cette mise à jour générique.
   try {
-    const files = fs.readdirSync(__dirname).filter(f => f.endsWith('.html'));
-    for (const file of files) {
-      const html = fs.readFileSync(path.join(__dirname, file), 'utf-8');
-      const m = html.match(/window\.WINES_DATA=(\[.+?\]);/s) ||
-                html.match(/window\.WINES_DATA = (\[.+?\]);/s);
-      if (m) {
-        WINES_CATALOG = JSON.parse(m[1]);
-        console.log('📦 Catalogue:', WINES_CATALOG.length, 'vins depuis', file);
-        return;
-      }
+    const file = path.join(__dirname, 'wines-data.js');
+    if (!fs.existsSync(file)) {
+      console.warn('⚠️  wines-data.js introuvable — voir INSTALLER.bat / migration');
+      return;
     }
-    console.warn('⚠️  Catalogue non trouvé');
+    const code = fs.readFileSync(file, 'utf-8');
+    const sandbox = { window: {} };
+    // Le fichier ne fait que peupler window.WINES_DATA / window.CATALOG_DATA :
+    // l'exécuter dans un contexte minimal isolé suffit, pas besoin d'un
+    // vrai bac à sable (fichier généré et maintenu par nous, pas une entrée
+    // utilisateur).
+    new Function('window', code)(sandbox.window);
+    BASE_CATALOG = sandbox.window.WINES_DATA || [];
+    console.log('📦 Catalogue:', BASE_CATALOG.length, 'vins depuis wines-data.js');
+    applyStockOverrides();
   } catch(e) {
     console.warn('⚠️  Erreur catalogue:', e.message);
   }
+}
+
+// Fusionne data/stock-overrides.json (id, stock, price, featured) sur
+// BASE_CATALOG pour produire WINES_CATALOG. Appelé au démarrage et après
+// chaque import CSV / mise en avant depuis Admin > Config, pour que Gabriel
+// voie immédiatement les nouveaux prix/stocks sans redémarrer le serveur.
+function applyStockOverrides() {
+  const overrides = readJSON('stock-overrides', []);
+  if (!Array.isArray(overrides) || !overrides.length) {
+    WINES_CATALOG = BASE_CATALOG;
+    return;
+  }
+  const byId = new Map(overrides.map(o => [o.id, o]));
+  WINES_CATALOG = BASE_CATALOG.map(w => {
+    const o = byId.get(w.id);
+    if (!o) return w;
+    const price = (typeof o.price === 'number' && o.price > 0) ? o.price : w.price;
+    return {
+      ...w,
+      price,
+      stock: (typeof o.stock === 'number' && o.stock >= 0) ? o.stock : w.stock,
+      featured: typeof o.featured === 'boolean' ? o.featured : w.featured,
+    };
+  });
+  console.log('🔄 Overrides stock/prix appliqués au catalogue serveur (' + overrides.length + ' vin(s)).');
 }
 
 // ── Conversion des nombres écrits en toutes lettres ───────────────────────────
@@ -169,6 +398,24 @@ function parseBudget(txt) {
   return null;
 }
 
+// ── Règles de style par accord ──────────────────────────────────────────────
+// Utilisées à la fois par /sommelier (chat libre) et /selection-accord
+// (questionnaire guidé) pour que les deux entrées appliquent le même
+// raisonnement mets-vins.
+const PAIRING_RULES = {
+  'poisson':       'UNIQUEMENT blancs secs ou rosés très légers. AUCUN rouge.',
+  'fruits de mer': 'UNIQUEMENT blancs vifs, rosés très secs, ou bulles. AUCUN rouge.',
+  'volaille':      'Blancs ronds ou rouges très légers (Gamay, Pinot Noir léger).',
+  'viande':        'UNIQUEMENT rouges structurés. Pas de blanc.',
+  'barbecue':      'Rouges fruités ou rosés charnus. Pas de blanc.',
+  'fromage':       'Blanc ou rouge léger selon le fromage.',
+  'dessert':       'Vins doux (Banyuls, Sauternes, Muscat) ou bulles demi-sec.',
+  'apéritif':      'Bulles, blancs vifs, rosés légers — ou Champagne/Crémant pour une réception.',
+  'méditerranéen': 'Rouges légers, rosés ou blancs du sud.',
+  'asiatique':     'Blancs aromatiques (Gewurztraminer, Viognier, Riesling).',
+  'charcuterie':   'Rouges fruités ou rosés généreux.',
+};
+
 // ── Détection de l'accord ─────────────────────────────────────────────────────
 function detectPairing(messages) {
   const txt = messages.filter(m => m.role === 'user').map(m => m.content).join(' ').toLowerCase();
@@ -181,11 +428,10 @@ function detectPairing(messages) {
     { p: 'fromage',        r: /fromage|comté|brie|camembert|roquefort|chèvre|raclette|fondue|munster|époisses|reblochon|beaufort|emmental|gruyère|parmesan|plateau de fromage/ },
     { p: 'charcuterie',    r: /charcuterie|jambon|saucisson|pâté|terrine|rillette|coppa|chorizo|salami|mortadelle|andouille|boudin/ },
     { p: 'dessert',        r: /dessert|gâteau|tarte|chocolat|moelleux|tiramisu|fondant|crème brûlée|panna cotta|mousse|sorbet|glace|macaron|sucré/ },
-    { p: 'apéritif',       r: /apéro|apéritif|mise en bouche|tapas|verrines|amuse.?bouche|avant le repas|canapé|grignotage/ },
+    { p: 'apéritif',       r: /apéro|apéritif|mise en bouche|tapas|verrines|amuse.?bouche|avant le repas|canapé|grignotage|anniversaire|fête|mariage|célébration|réveillon|noël|nouvel an|baptême|communion|cadeau|événement/ },
     { p: 'barbecue',       r: /barbecue|barbec|bbq|grill|plancha|brochette|merguez|saucisse grillée|grillades|ribs|burgers?/ },
     { p: 'méditerranéen',  r: /méditerranéen|pizza|pasta|pâtes|risotto|ratatouille|niçoise|provençal|couscous|paella|moussaka|lasagnes?|tapenade/ },
     { p: 'asiatique',      r: /asiatique|sushi|japonais|thaï|curry|wok|chinois|coréen|vietnamien|indien|pad thaï|ramen|pho|gyoza|bibimbap/ },
-    { p: 'fête',           r: /anniversaire|fête|mariage|célébration|réveillon|noël|nouvel an|baptême|communion|cadeau|événement/ },
   ];
 
   for (const { p, r } of map) {
@@ -198,8 +444,10 @@ function detectPairing(messages) {
 }
 
 // ── Route sommelier ───────────────────────────────────────────────────────────
-app.post('/sommelier', async (req, res) => {
-  const { messages, system } = req.body;
+app.post('/sommelier', rateLimit(30), async (req, res) => {
+  const { messages, system, featuredIds } = req.body;
+  const featuredSet = new Set(Array.isArray(featuredIds) ? featuredIds : []);
+  const featuredBonus = w => featuredSet.has(w.id) ? 3 : 0; // même logique de départage que /selection-accord
 
   const budget  = detectBudget(messages);
   const pairing = detectPairing(messages);
@@ -246,14 +494,14 @@ app.post('/sommelier', async (req, res) => {
         return [...cands].sort((a, b) => {
           const da = Math.abs(a.price - target), db = Math.abs(b.price - target);
           if (Math.abs(da - db) > 2) return da - db;
-          return b.rating - a.rating;
+          return (b.rating + featuredBonus(b)) - (a.rating + featuredBonus(a));
         }).slice(0, 5);
       });
       available = tierWines.flat();
     } else {
       available = WINES_CATALOG
         .filter(w => pairingOk(w))
-        .sort((a, b) => b.rating - a.rating)
+        .sort((a, b) => (b.rating + featuredBonus(b)) - (a.rating + featuredBonus(a)))
         .slice(0, 15);
     }
 
@@ -272,33 +520,25 @@ app.post('/sommelier', async (req, res) => {
     }
 
     if (pairing) {
-      const rules = {
-        'poisson':       'UNIQUEMENT blancs secs ou rosés très légers. AUCUN rouge.',
-        'fruits de mer': 'UNIQUEMENT blancs vifs, rosés très secs, ou bulles. AUCUN rouge.',
-        'volaille':      'Blancs ronds ou rouges très légers (Gamay, Pinot Noir léger).',
-        'viande':        'UNIQUEMENT rouges structurés. Pas de blanc.',
-        'barbecue':      'Rouges fruités ou rosés charnus. Pas de blanc.',
-        'fromage':       'Blanc ou rouge léger selon le fromage.',
-        'dessert':       'Vins doux (Banyuls, Sauternes, Muscat) ou bulles demi-sec.',
-        'apéritif':      'Bulles, blancs vifs, rosés légers.',
-        'méditerranéen': 'Rouges légers, rosés ou blancs du sud.',
-        'asiatique':     'Blancs aromatiques (Gewurztraminer, Viognier, Riesling).',
-        'charcuterie':   'Rouges fruités ou rosés généreux.',
-        'fête':          'Champagne, Crémant, ou blancs festifs.',
-      };
-      inject += '\nACCORD : ' + (rules[pairing] || 'adapte le vin au plat.');
+      inject += '\nACCORD : ' + (PAIRING_RULES[pairing] || 'adapte le vin au plat.');
     }
 
     if (available.length >= 3) {
       inject += '\nVINS DISPONIBLES — RÈGLE ABSOLUE : tes 3 propositions doivent EXCLUSIVEMENT provenir de ces listes.';
       inject += '\nIgnore tout autre vin du catalogue général, même s\'il te semble pertinent. Proposer un vin hors liste est une erreur grave.';
-      const fmt = w => '\n  ID:' + w.id + ' | ' + w.name + ' | ' + w.type + ' | ' + w.price + '€ | ' + w.region + ' | Note:' + w.rating;
+      const fmt = w => '\n  ID:' + w.id + ' | ' + w.name + ' | ' + w.type + ' | ' + w.price + '€ | ' + w.region + ' | Note:' + w.rating +
+        (featuredSet.has(w.id) ? ' | [MIS EN AVANT PAR LE MAGASIN]' : '');
       if (tierWines) {
         inject += '\nCandidats pour le vin 🥇 :'; tierWines[0].forEach(w => inject += fmt(w));
         inject += '\nCandidats pour le vin ⭐ :';  tierWines[1].forEach(w => inject += fmt(w));
         inject += '\nCandidats pour le vin ✨ :';  tierWines[2].forEach(w => inject += fmt(w));
       } else {
         available.forEach(w => inject += fmt(w));
+      }
+      if (featuredSet.size) {
+        inject += '\nCertains vins sont marqués [MIS EN AVANT PAR LE MAGASIN] : en cas d\'ÉGALITÉ de pertinence entre ' +
+          'plusieurs candidats pour un même palier, privilégie ceux-là. Mais ne choisis JAMAIS un vin uniquement parce ' +
+          'qu\'il est marqué s\'il correspond moins bien au plat ou au budget qu\'une alternative non marquée.';
       }
     }
 
@@ -422,6 +662,185 @@ app.post('/sommelier', async (req, res) => {
   }
 });
 
+// ── Route questionnaire guidé (3 questions) ───────────────────────────────────
+// Applique le même raisonnement que Gabriel (chat libre) : le type/budget/
+// accord choisis par le client servent de FILTRE DE SÉCURITÉ (jamais de
+// contresens comme un rouge tannique avec un poisson cru), puis Gabriel
+// choisit 3 vins DANS ce sous-ensemble en se basant sur les vraies données
+// du vin (cépage, région, notes de dégustation) plutôt que sur un simple
+// tri par prix — exactement le même travail que dans le chat.
+const BUDGET_BRACKETS = {
+  '-8':    { min: 0,  max: 8   },
+  '8-15':  { min: 8,  max: 15  },
+  '15-25': { min: 15, max: 25  },
+  '25+':   { min: 25, max: Infinity },
+};
+
+app.post('/selection-accord', rateLimit(30), async (req, res) => {
+  const { type, budget, pairing, detail, featuredIds } = req.body;
+  const featuredSet = new Set(Array.isArray(featuredIds) ? featuredIds : []);
+
+  if (!WINES_CATALOG.length) {
+    return res.status(500).json({ error: 'catalogue non chargé' });
+  }
+  const bracket = BUDGET_BRACKETS[budget];
+  if (!bracket) {
+    return res.status(400).json({ error: 'budget invalide' });
+  }
+
+  // ── Constitution du vivier, avec replis progressifs (même logique que
+  //    le repli côté client) : 1) type+budget+accord  2) type+budget
+  //    3) type seul — pour ne jamais renvoyer un panier vide.
+  const matchBudget = w => w.price >= bracket.min && (bracket.max === Infinity || w.price <= bracket.max);
+  const matchType    = w => !type || w.type === type;
+  const matchPairing = w => !pairing || (w.pairings || []).includes(pairing);
+
+  let pool = WINES_CATALOG.filter(w => matchType(w) && matchBudget(w) && matchPairing(w));
+  let poolLabel = 'type + budget + accord';
+  if (pool.length < 3) { pool = WINES_CATALOG.filter(w => matchType(w) && matchBudget(w)); poolLabel = 'type + budget'; }
+  if (pool.length < 3) { pool = WINES_CATALOG.filter(w => matchType(w)); poolLabel = 'type seul'; }
+  if (!pool.length) pool = WINES_CATALOG;
+
+  // Pour la tranche "25€ et plus" (sans plafond), on limite le vivier envoyé
+  // à Gabriel à des prix raisonnables (jusqu'à 110€) pour ne pas partir sur
+  // des cuvées d'exception dès le premier questionnaire.
+  const closedBracket = bracket.max !== Infinity;
+  const basePool = closedBracket ? pool : pool.filter(w => w.price <= 110);
+
+  // ── Biais "tranche haute" ────────────────────────────────────────────────
+  // Le client choisit une tranche fermée (ex. 15-25€) mais s'attend à des
+  // propositions qui tirent vers le HAUT de cette tranche plutôt que
+  // réparties uniformément — même logique que /sommelier (chat libre) où
+  // le budget de référence est le max annoncé. On pondère donc la note par
+  // la proximité au point de référence (75% de la tranche), sans jamais
+  // exclure les vins moins chers : un vin nettement mieux noté ou plus
+  // singulier reste éligible même s'il est proche du bas de la tranche.
+  const ref = closedBracket ? bracket.min + (bracket.max - bracket.min) * 0.75 : null;
+  const span = closedBracket ? Math.max(1, bracket.max - bracket.min) : 1;
+  // Bonus "sélection magasin" : même ordre de grandeur que le biais tranche
+  // haute (max 15) — ça augmente les chances qu'un vin mis en avant fasse
+  // partie du vivier envoyé à Gabriel, mais ne dicte jamais SON choix parmi
+  // ce vivier : le raisonnement accord/structure reste géré exclusivement
+  // par le prompt ci-dessous, jamais par ce score.
+  const FEATURED_BONUS = 8;
+  const scored = basePool.map(w => {
+    const proximityBonus = ref !== null ? Math.max(0, 1 - Math.abs(w.price - ref) / span) * 15 : 0;
+    const featuredBonus = featuredSet.has(w.id) ? FEATURED_BONUS : 0;
+    return { w, score: w.rating + proximityBonus + featuredBonus };
+  });
+
+  const candidates = scored
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 14)
+    .map(s => s.w);
+
+  // ── Repli sans IA : on choisit 3 vins à prix croissants dans le vivier,
+  //    puis on leur assigne un rôle par heuristique simple (le mieux noté
+  //    des trois = valeur sûre, le plus atypique en prix = découverte).
+  const fallbackWines = candidates.slice().sort((a, b) => a.price - b.price).slice(0, 3);
+  const fallbackIds = fallbackWines.map(w => w.id);
+  const fallbackRoles = (() => {
+    if (fallbackWines.length < 3) return {};
+    const byRating = [...fallbackWines].sort((a, b) => b.rating - a.rating);
+    const roles = { [byRating[0].id]: 'valeur_sure' };
+    const rest = fallbackWines.filter(w => w.id !== byRating[0].id);
+    roles[rest[0].id] = 'coup_de_coeur';
+    roles[rest[1].id] = 'decouverte';
+    return roles;
+  })();
+
+  if (!candidates.length) {
+    return res.json({ ids: fallbackIds, roles: fallbackRoles, reasons: {} });
+  }
+
+  const fmt = w => '\n  ID:' + w.id + ' | ' + w.name + ' | ' + w.price + '€ | ' + w.region +
+    ' | cépage: ' + w.grape + ' | note:' + w.rating + ' | dégustation: ' + w.tastingNotes +
+    (featuredSet.has(w.id) ? ' | [MIS EN AVANT PAR LE MAGASIN]' : '');
+
+  const system = 'Tu es Gabriel, sommelier expert. Un client a choisi, via un questionnaire guidé : ' +
+    'type de vin = ' + type + ', budget = ' + budget + '€, accord recherché = ' + (pairing || 'aucun en particulier') +
+    (detail ? ', précision sur le plat = ' + detail : '') + '.\n' +
+    (pairing ? 'RÈGLE D\'ACCORD : ' + (PAIRING_RULES[pairing] || 'adapte le vin au plat.') + '\n' : '') +
+    (detail ? 'IMPORTANT : utilise la précision "' + detail + '" pour affiner ton choix (poids du plat, cuisson, intensité) — ne te contente pas de la catégorie générale.\n' : '') +
+    'Voici les vins disponibles (filtre : ' + poolLabel + ') :' +
+    candidates.map(fmt).join('') +
+    '\n\nChoisis EXACTEMENT 3 vins parmi ces IDs, en te comportant comme un vrai sommelier : ' +
+    'raisonne sur le poids et la structure du vin par rapport au plat, l\'acidité, les tanins face au gras, ' +
+    'l\'intensité aromatique — pas seulement sur le prix. Les 3 vins doivent couvrir des profils ou prix différents ' +
+    'pour offrir un vrai choix, avec des prix croissants du premier au troisième.\n' +
+    (featuredSet.size ? 'Certains vins sont marqués [MIS EN AVANT PAR LE MAGASIN] : en cas d\'ÉGALITÉ de pertinence entre ' +
+      'plusieurs vins pour un même rôle, privilégie ceux-là. Mais ne choisis JAMAIS un vin uniquement parce qu\'il est ' +
+      'marqué s\'il correspond moins bien au plat, au budget ou au profil recherché qu\'une alternative non marquée — ' +
+      'l\'accord et la qualité de la recommandation priment toujours sur ce marquage.\n' : '') +
+    '\n' +
+    'En plus du choix, attribue à CHAQUE vin un rôle parmi ces 3 (chacun utilisé UNE SEULE fois) :\n' +
+    '  - "valeur_sure" : vin fiable, typique de son appellation/cépage, bon rapport note/prix — le choix sans surprise.\n' +
+    '  - "coup_de_coeur" : le vin qui fait le meilleur accord avec le plat, ou le plus séduisant en intensité/équilibre.\n' +
+    '  - "decouverte" : vin plus atypique — cépage rare, région moins connue, style original — indépendamment de son prix ' +
+    '(une découverte n\'est PAS forcément la plus chère des trois).\n' +
+    'Le rôle ne doit PAS être déduit du rang de prix : base-toi sur les caractéristiques réelles du vin (cépage, région, notes de dégustation).\n' +
+    'Réponds UNIQUEMENT en JSON, sans aucun texte avant ou après, sous cette forme exacte :\n' +
+    '{"ids":[id1,id2,id3],' +
+    '"roles":{"id1":"valeur_sure|coup_de_coeur|decouverte","id2":"...","id3":"..."},' +
+    '"reasons":{"id1":"raison courte en français, 12 mots max","id2":"...","id3":"..."}}';
+
+  const askOnce = async (extra) => {
+    const payload = JSON.stringify({
+      model: CONFIG.model,
+      max_tokens: 500,
+      temperature: 0.4,
+      messages: [{ role: 'system', content: system + (extra || '') }, { role: 'user', content: 'Choisis mes 3 vins.' }],
+    });
+    const raw = await callApi({
+      hostname: 'api.mistral.ai',
+      path: '/v1/chat/completions',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + CONFIG.apiKey,
+        'Content-Length': Buffer.byteLength(payload),
+      },
+      payload,
+    });
+    const data = JSON.parse(raw);
+    if (data.error) throw new Error(data.error.message || 'erreur API Mistral');
+    const text = data.choices[0].message.content.trim();
+    const m = text.match(/\{[\s\S]*\}/);
+    return JSON.parse(m ? m[0] : text);
+  };
+
+  const candidateIds = new Set(candidates.map(w => w.id));
+  const VALID_ROLES = new Set(['valeur_sure', 'coup_de_coeur', 'decouverte']);
+  const validate = (parsed) => {
+    if (!parsed || !Array.isArray(parsed.ids) || parsed.ids.length !== 3) return false;
+    if (!parsed.ids.every(id => candidateIds.has(id))) return false;
+    if (!parsed.roles || typeof parsed.roles !== 'object') return false;
+    const assignedRoles = parsed.ids.map(id => parsed.roles[id]);
+    if (!assignedRoles.every(r => VALID_ROLES.has(r))) return false;
+    if (new Set(assignedRoles).size !== 3) return false; // les 3 rôles doivent être distincts
+    return true;
+  };
+
+  try {
+    let parsed = await askOnce();
+    if (!validate(parsed)) {
+      console.warn('⚠️  /selection-accord réponse non conforme → retry correctif');
+      parsed = await askOnce(
+        '\n\n>>> CORRECTION : choisis STRICTEMENT 3 IDs parmi la liste fournie ci-dessus, prix croissants, ' +
+        'et assigne les 3 rôles "valeur_sure"/"coup_de_coeur"/"decouverte" chacun une seule fois, dans le champ "roles". <<<'
+      );
+    }
+    if (!validate(parsed)) {
+      console.warn('⚠️  /selection-accord toujours non conforme → repli sur sélection automatique');
+      return res.json({ ids: fallbackIds, roles: fallbackRoles, reasons: {} });
+    }
+    console.log('✅ /selection-accord →', parsed.ids.map(id => id + ':' + parsed.roles[id]).join(', '));
+    return res.json({ ids: parsed.ids, roles: parsed.roles, reasons: parsed.reasons || {} });
+  } catch (e) {
+    console.error('Erreur /selection-accord:', e.message, '→ repli sur sélection automatique');
+    return res.json({ ids: fallbackIds, roles: fallbackRoles, reasons: {} });
+  }
+});
+
 // ── Helper HTTPS ──────────────────────────────────────────────────────────────
 function callApi({ hostname, path, headers, payload }) {
   return new Promise((resolve, reject) => {
@@ -437,12 +856,40 @@ function callApi({ hostname, path, headers, payload }) {
 }
 
 // ── Démarrage ─────────────────────────────────────────────────────────────────
-app.listen(PORT, () => {
+const startedAt = Date.now();
+const server = app.listen(PORT, () => {
   loadCatalog();
   console.log('\n🍷  Wine Select — Serveur Gabriel');
   console.log('──────────────────────────────────');
   console.log('   http://localhost:' + PORT);
-  console.log('   Modèle : ' + CONFIG.model);
-  console.log('   Clé API : ' + CONFIG.apiKey.substring(0, 8) + '...  ✅');
+  console.log('   Modèle   : ' + CONFIG.model);
+  console.log('   Clé API  : ' + CONFIG.apiKey.substring(0, 8) + '...  ✅');
+  console.log('   PID      : ' + process.pid);
+  console.log('   Démarré  : ' + new Date().toLocaleString('fr-FR'));
   console.log('──────────────────────────────────\n');
+});
+
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error('\n❌ Le port ' + PORT + ' est déjà utilisé par un autre process.');
+    console.error('   Un ancien serveur Wine Select (ou autre) tourne encore.');
+    console.error('   → Ferme toutes les fenêtres "Wine Select Serveur" ouvertes,');
+    console.error('     ou dans une invite de commandes : netstat -aon | findstr ":' + PORT + '"');
+    console.error('     puis : taskkill /PID <numero> /F');
+    console.error('   Ce serveur ne démarre PAS tant que le port est occupé.\n');
+    process.exit(1);
+  }
+  throw err;
+});
+
+// Endpoint de vérification rapide : utile pour confirmer, après une mise à jour,
+// que c'est bien LE NOUVEAU serveur qui répond (et pas un ancien process resté
+// actif sur le port 3000). Ouvrir http://localhost:3000/version dans un navigateur.
+app.get('/version', (req, res) => {
+  res.json({
+    pid: process.pid,
+    demarre: new Date(startedAt).toLocaleString('fr-FR'),
+    vinsEnCatalogue: WINES_CATALOG.length,
+    modele: CONFIG.model,
+  });
 });
