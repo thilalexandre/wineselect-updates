@@ -2,6 +2,12 @@ const express = require('express');
 const https   = require('https');
 const path    = require('path');
 const fs      = require('fs');
+
+// Moteur d'accords par profils (accords.js + profils-reference.js). S'il
+// manque, le serveur fonctionne comme avant, avec le tri par catégorie.
+let ACCORDS = null;
+try { ACCORDS = require('./accords.js'); }
+catch (e) { console.warn('⚠️  accords.js absent : tri par catégorie uniquement (' + e.message + ')'); }
 const crypto  = require('crypto');
 
 const app  = express();
@@ -450,7 +456,12 @@ app.post('/sommelier', rateLimit(30), async (req, res) => {
   const featuredBonus = w => featuredSet.has(w.id) ? 3 : 0; // même logique de départage que /selection-accord
 
   const budget  = detectBudget(messages);
-  const pairing = detectPairing(messages);
+  // Moteur d'accords : l'IA décrit le plat, les vins sont notés selon leur profil.
+  // null si aucun plat n'est évoqué ou si l'analyse échoue → ancien tri ci-dessous.
+  const moteur = (ACCORDS && WINES_CATALOG.length)
+    ? await ACCORDS.preparerSommelier({ messages, system, budget, featuredSet, catalogue: WINES_CATALOG, callApi, config: CONFIG }).catch(() => null)
+    : null;
+  const pairing = moteur ? null : detectPairing(messages);
 
   if (budget)  console.log('💰 Budget:', budget.label, '→', Math.round(budget.min) + '€ –', Math.round(budget.max) + '€');
   if (pairing) console.log('🍽  Accord:', pairing);
@@ -459,7 +470,9 @@ app.post('/sommelier', rateLimit(30), async (req, res) => {
   let finalSystem = system;
   let tierWines = null, available = [];
 
-  if ((budget || pairing) && WINES_CATALOG.length) {
+  if (moteur) {
+    finalSystem = moteur.finalSystem; tierWines = moteur.tierWines; available = moteur.available;
+  } else if ((budget || pairing) && WINES_CATALOG.length) {
     const pairingOk = w => !pairing || (w.pairings && w.pairings.includes(pairing));
 
     // ── Escalier de prix sur 3 paliers, basé sur le MAXIMUM annoncé ──
@@ -686,6 +699,12 @@ app.post('/selection-accord', rateLimit(30), async (req, res) => {
   const bracket = BUDGET_BRACKETS[budget];
   if (!bracket) {
     return res.status(400).json({ error: 'budget invalide' });
+  }
+
+  // Nouveau parcours « Je cherche un vin pour… » : l'écran envoie une occasion.
+  // Sans occasion (ancienne version de l'écran), on garde l'ancien fonctionnement ci-dessous.
+  if (ACCORDS && req.body.occasion) {
+    return ACCORDS.selectionGuidee(req.body, bracket, featuredSet, res, { catalogue: WINES_CATALOG, callApi, config: CONFIG });
   }
 
   // ── Constitution du vivier, avec replis progressifs (même logique que

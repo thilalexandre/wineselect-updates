@@ -1068,155 +1068,345 @@ function Home({setView, collector, customerApi}) {
 }
 
 // ── SELECTION ─────────────────────────────────────────────────────────────────
-function Selection({setView, setResults}) {
-  const [step, setStep]       = useState(1);
-  const [type, setType]       = useState(null);
-  const [budget, setBudget]   = useState(null);
-  const [pairing, setPairing] = useState(null);
-  const [awaitingDetail, setAwaitingDetail] = useState(false);
-  const [thinking, setThinking] = useState(false);
-  const count = filterWines(type, budget, null).length;
-  const pairingOpts = PAIRINGS.filter(p=>(PTY[type]||PAIRINGS.map(x=>x.id)).includes(p.id));
-  const stepLabels = ['Type de vin','Budget','Accord mets-vins'];
+// Parcours guidé « Je cherche un vin pour… » (PARCOURS_GUIDE_V2)
+//   … l'apéritif           → Qu'aimez-vous dans un vin ? → budget
+//   … accompagner un repas → Qu'allez-vous manger ? (→ Comment est-il préparé ?) → budget → Avez-vous une préférence ?
+//   … offrir               → Connaissez-vous ses goûts ? → budget
+//   … cuisiner avec        → Quelle recette ? → budget
+// Le choix des vins est fait par le serveur (/selection-accord, moteur d'accords).
+const OCCASIONS_UI = [
+  {id:'aperitif', label:"… l'apéritif",           desc:'Un verre, avec ou sans grignotage'},
+  {id:'repas',    label:'… accompagner un repas', desc:'À boire avec votre plat'},
+  {id:'offrir',   label:'… offrir',               desc:'Une bouteille qui fera plaisir'},
+  {id:'cuisiner', label:'… cuisiner avec',        desc:'Le vin entre dans la recette'},
+];
+const GOUTS_UI = [
+  {id:'leger_frais',     label:'Léger et frais',     desc:'Désaltérant, facile à boire'},
+  {id:'fruite_gourmand', label:'Fruité et gourmand', desc:'Rond, plein de fruit'},
+  {id:'riche_intense',   label:'Riche et intense',   desc:'De la matière, du caractère'},
+  {id:'doux',            label:'Doux',               desc:'Une touche sucrée'},
+  {id:'inconnu',         label:'Je ne sais pas',     desc:'Laissez Gabriel vous guider'},
+];
+const RECETTES_UI = [
+  {id:'bourguignon', label:'Bœuf bourguignon',          couleur:'rouge'},
+  {id:'coq_au_vin',  label:'Coq au vin',                couleur:'rouge'},
+  {id:'moules',      label:'Moules marinières',         couleur:'blanc'},
+  {id:'risotto',     label:'Risotto',                   couleur:'blanc'},
+  {id:'fondue',      label:'Fondue savoyarde',          couleur:'blanc'},
+  {id:'sauce',       label:'Une sauce ou un déglaçage', couleur:null},
+];
 
-  // Repli local si le serveur ne répond pas — même logique de secours
-  // qu'avant, pour ne jamais laisser le client sans résultat.
-  // Rôles assignés par heuristique (miroir du repli serveur) : le mieux noté
-  // des trois = valeur sûre, les 2 autres = coup de cœur / découverte — jamais
-  // par position, pour rester cohérent avec le mode normal (réponse Gabriel).
+function OccasionIcon({id, size=30, color}) {
+  const c = color || C.wine;
+  const s = {fill:'none', stroke:c, strokeWidth:1.6, strokeLinecap:'round', strokeLinejoin:'round'};
+  if (id === 'aperitif') return <PairingIcon id="apéritif" color={c} size={size}/>;
+  if (id === 'repas') return (
+    <svg width={size} height={size} viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+      <circle cx="16" cy="17" r="8" {...s}/><circle cx="16" cy="17" r="4.5" {...s}/>
+      <path d="M4 7v6c0 1.2.8 2 2 2v10M6 7v5M8 7v6c0 1.2-.8 2-2 2" {...s}/>
+      <path d="M27 7c-2 1-2.5 4-2.5 7h2.5v11" {...s}/>
+    </svg>);
+  if (id === 'offrir') return (
+    <svg width={size} height={size} viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+      <rect x="6" y="13" width="20" height="13" rx="1.5" {...s}/><rect x="4.5" y="9.5" width="23" height="3.5" rx="1" {...s}/>
+      <path d="M16 9.5V26" {...s}/><path d="M16 9.5c-1.5-3.5-6-4.5-6-1.5 0 1.8 3.5 1.5 6 1.5zM16 9.5c1.5-3.5 6-4.5 6-1.5 0 1.8-3.5 1.5-6 1.5z" {...s}/>
+    </svg>);
+  if (id === 'cuisiner') return (
+    <svg width={size} height={size} viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+      <path d="M7 14h18v7c0 2.8-2.2 5-5 5h-8c-2.8 0-5-2.2-5-5v-7z" {...s}/>
+      <path d="M4 14h3M25 14h3M11 14c0-2 2-3 5-3s5 1 5 3" {...s}/>
+      <path d="M13 8c0-1.2 1-1.4 1-2.6M17.5 8c0-1.2 1-1.4 1-2.6" {...s}/>
+    </svg>);
+  return null;
+}
+
+function Selection({setView, setResults}) {
+  const [screen,   setScreen]   = useState('occasion');
+  const [hist,     setHist]     = useState([]);
+  const [occasion, setOccasion] = useState(null);
+  const [gout,     setGout]     = useState(null);
+  const [pairing,  setPairing]  = useState(null);
+  const [detail,   setDetail]   = useState(null);   // {id, label}
+  const [platLibre, setPlatLibre] = useState('');
+  const [recette,  setRecette]  = useState(null);
+  const [recetteLibre, setRecetteLibre] = useState('');
+  const [budget,   setBudget]   = useState(null);
+  const [couleur,  setCouleur]  = useState(null);
+  const [texte,    setTexte]    = useState('');     // saisie de l'écran « Dites-le »
+  const [info,     setInfo]     = useState(null);   // recette sans vin
+  const {mic, toggle, transcript} = useMic(t => setTexte(prev => (prev ? prev + ' ' : '') + t));
+
+  const go = s => { setHist(h => h.concat([screen])); setScreen(s); };
+  const back = () => {
+    if (screen === 'thinking') return;
+    if (!hist.length) { setView('home'); return; }
+    setScreen(hist[hist.length - 1]);
+    setHist(h => h.slice(0, -1));
+  };
+
+  const total = occasion === 'repas' ? 4 : 3;
+  const STEP = {occasion:1, gout:2, plat:2, precision:2, libre:2, recette:2, budget:3, couleur:4, info:2, thinking:total};
+  const LABEL = {
+    occasion:'Occasion', gout: occasion === 'offrir' ? 'Ses goûts' : 'Vos goûts', plat:'Votre plat',
+    precision:'Préparation', libre: occasion === 'cuisiner' ? 'Votre recette' : 'Votre plat',
+    recette:'Votre recette', budget:'Budget', couleur:'Préférence', info:'Votre recette', thinking:'Sélection',
+  };
+  const step = STEP[screen] || 1;
+  const count = filterWines(couleur, budget, null).length;
+
+  // ── Choix ────────────────────────────────────────────────────────────────
+  const pickOccasion = o => {
+    setOccasion(o); setGout(null); setPairing(null); setDetail(null); setPlatLibre('');
+    setRecette(null); setRecetteLibre(''); setCouleur(null); setTexte('');
+    go(o === 'repas' ? 'plat' : o === 'cuisiner' ? 'recette' : 'gout');
+  };
+  const pickGout = g => { setGout(g); go('budget'); };
+  const pickPairing = p => {
+    setPairing(p); setDetail(null); setPlatLibre('');
+    go(PAIRING_DETAILS[p] ? 'precision' : 'budget');
+  };
+  const pickDetail = d => { setDetail(d); go('budget'); };
+  const pickRecette = r => { setRecette(r); setRecetteLibre(''); go('budget'); };
+  const ouvrirLibre = () => { setTexte(occasion === 'cuisiner' ? recetteLibre : platLibre); go('libre'); };
+  const validerLibre = () => {
+    const t = (texte || transcript || '').trim();
+    if (!t) return;
+    if (occasion === 'cuisiner') { setRecetteLibre(t); setRecette(null); }
+    else { setPlatLibre(t); setPairing(null); setDetail(null); }
+    go('budget');
+  };
+  const pickBudget = b => {
+    setBudget(b);
+    if (occasion === 'repas') go('couleur');
+    else run({budget:b});
+  };
+  const pickCouleur = c => { setCouleur(c); run({couleur:c}); };
+
+  // ── Repli local si le serveur ne répond pas ──────────────────────────────
   const withFallbackRoles = wines => {
     if (wines.length < 3) return wines;
-    const byRating = [...wines].sort((a,b)=>b.rating-a.rating);
-    const roles = { [byRating[0].id]: 'valeur_sure' };
-    const rest = wines.filter(w=>w.id!==byRating[0].id);
+    const byRating = [...wines].sort((a,b) => b.rating - a.rating);
+    const roles = {[byRating[0].id]:'valeur_sure'};
+    const rest = wines.filter(w => w.id !== byRating[0].id);
     roles[rest[0].id] = 'coup_de_coeur';
     roles[rest[1].id] = 'decouverte';
     return wines.map(w => ({...w, aiRole: roles[w.id]}));
   };
-
-  const localFallback = p => {
-    let r = filterWines(type, budget, p).slice(0,3);
-    if (r.length<3) { const e=filterWines(type,budget,null).filter(w=>!r.find(x=>x.id===w.id)); r=[...r,...e].slice(0,3); }
-    if (r.length<3) { const e=filterWines(type,null,null).filter(w=>!r.find(x=>x.id===w.id));   r=[...r,...e].slice(0,3); }
+  const localFallback = o => {
+    const rec = RECETTES_UI.find(x => x.id === o.recette);
+    const type = o.couleur || (o.occasion === 'cuisiner' && rec ? rec.couleur : null);
+    const p = o.occasion === 'repas' ? o.pairing : o.occasion === 'aperitif' ? 'apéritif' : null;
+    let r = filterWines(type, o.budget, p).slice(0,3);
+    if (r.length < 3) { const e = filterWines(type, o.budget, null).filter(w => !r.find(x => x.id === w.id)); r = [...r, ...e].slice(0,3); }
+    if (r.length < 3) { const e = filterWines(type, null, null).filter(w => !r.find(x => x.id === w.id)); r = [...r, ...e].slice(0,3); }
     return withFallbackRoles(r);
   };
 
-  const pickType = t => { setType(t); setStep(2); };
-  const pickBudget = b => { setBudget(b); setStep(3); };
-
-  const choosePairing = p => {
-    setPairing(p);
-    if (PAIRING_DETAILS[p]) setAwaitingDetail(true);
-    else runSelection(p, null);
+  // ── Envoi au serveur ─────────────────────────────────────────────────────
+  const run = over => {
+    const o = Object.assign({
+      occasion: occasion, gout: gout, pairing: pairing, detail: detail ? detail.id : null,
+      platLibre: platLibre, recette: recette, recetteLibre: recetteLibre, budget: budget, couleur: couleur,
+    }, over || {});
+    setHist(h => h.concat([screen]));
+    setScreen('thinking');
+    fetch('http://localhost:3000/selection-accord', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(Object.assign({}, o, {featuredIds: WINES.filter(w => w.featured).map(w => w.id)})),
+    })
+      .then(res => { if (!res.ok) throw new Error('api'); return res.json(); })
+      .then(d => {
+        if (d.info === 'sansVin') { setInfo({plat: d.plat || o.recetteLibre}); setScreen('info'); return; }
+        if (d.error || !Array.isArray(d.ids)) throw new Error(d.error || 'réponse invalide');
+        let r = d.ids.map(id => WINES.find(w => w.id === id)).filter(Boolean);
+        if (r.length < 3) r = localFallback(o);
+        else if (d.roles && r.every(w => d.roles[w.id])) r = r.map(w => ({...w, aiReason:(d.reasons||{})[w.id], aiRole:d.roles[w.id]}));
+        else r = withFallbackRoles(r).map(w => ({...w, aiReason:(d.reasons||{})[w.id]}));
+        r.message = d.message || '';
+        setResults(r); setView('results');
+      })
+      .catch(() => { setResults(localFallback(o)); setView('results'); });
   };
 
-  const runSelection = async (p, detail) => {
-    setAwaitingDetail(false);
-    setThinking(true);
-    try {
-      const res = await fetch('http://localhost:3000/selection-accord', {
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({type, budget, pairing:p, detail, featuredIds: WINES.filter(w=>w.featured).map(w=>w.id)})
-      });
-      if (!res.ok) throw new Error('api');
-      const d = await res.json();
-      if (d.error || !Array.isArray(d.ids)) throw new Error(d.error||'réponse invalide');
-      let r = d.ids.map(id => WINES.find(w=>w.id===id)).filter(Boolean);
-      if (r.length<3) r = localFallback(p);
-      else if (d.roles && r.every(w=>d.roles[w.id])) {
-        r = r.map(w => ({...w, aiReason: (d.reasons||{})[w.id], aiRole: d.roles[w.id]}));
-      } else {
-        // Rôles absents/incomplets (ancien serveur, ou repli sans IA côté serveur) → heuristique locale.
-        r = withFallbackRoles(r).map(w => ({...w, aiReason: (d.reasons||{})[w.id]}));
-      }
-      setResults(r); setView('results');
-    } catch(e) {
-      setResults(localFallback(p)); setView('results');
-    } finally {
-      setThinking(false);
-    }
-  };
+  // ── Éléments d'interface ─────────────────────────────────────────────────
+  const titre = t => <h2 style={{...serif, fontSize:'clamp(1.5rem,4vw,2rem)', color:C.wine, textAlign:'center', marginBottom:20}}>{t}</h2>;
+  const hover = (e, on) => { e.currentTarget.style.borderColor = on ? C.gold : C.bord; e.currentTarget.style.transform = on ? 'translateY(-2px)' : 'translateY(0)'; };
+  const Carte = ({label, desc, onClick, icon, accent}) => (
+    <div onClick={onClick} onMouseEnter={e => hover(e, true)} onMouseLeave={e => hover(e, false)}
+      style={{background:accent ? '#fef9ed' : C.cream, border:'1.5px solid ' + (accent ? C.bord2 : C.bord), borderRadius:14, padding:'15px 16px', cursor:'pointer', transition:'all .2s', display:'flex', alignItems:'center', gap:13, boxShadow:'0 2px 8px rgba(107,31,42,.05)'}}>
+      {icon && <div style={{flexShrink:0, display:'flex'}}>{icon}</div>}
+      <div style={{flex:1, textAlign:'left'}}>
+        <div style={{...serif, fontSize:18, fontWeight:700, color:C.wine, lineHeight:1.2}}>{label}</div>
+        {desc && <div style={{fontSize:12, color:C.muted, marginTop:2}}>{desc}</div>}
+      </div>
+    </div>
+  );
+  const BoutonLibre = ({label, onClick}) => (
+    <div onClick={onClick} onMouseEnter={e => e.currentTarget.style.borderColor = C.gold} onMouseLeave={e => e.currentTarget.style.borderColor = C.bord2}
+      style={{gridColumn:'1 / -1', marginTop:4, background:'transparent', border:'1.5px dashed ' + C.bord2, borderRadius:12, padding:'13px 10px', textAlign:'center', cursor:'pointer', color:C.wine, fontSize:14, ...serif, fontWeight:600, transition:'border-color .2s'}}>
+      {label}
+    </div>
+  );
+  const goutsOrdre = occasion === 'offrir' ? [GOUTS_UI[4]].concat(GOUTS_UI.slice(0,4)) : GOUTS_UI;
+  const platsOpts = PAIRINGS.filter(p => p.id !== 'apéritif');
 
   return (
     <div style={{minHeight:'100vh', background:C.bg}}>
-      <Header title="Sélection guidée" subtitle={'Étape '+step+'/3 — '+(awaitingDetail?'Précisez':stepLabels[step-1])}
-        onBack={()=>awaitingDetail?setAwaitingDetail(false):(step>1?setStep(step-1):setView('home'))}
-        right={<div style={{background:'rgba(107,31,42,.08)', border:'1px solid '+C.bord, borderRadius:50, padding:'4px 12px', fontSize:12, color:C.wine}}>{count} vins</div>}/>
+      <Header title="Sélection guidée" subtitle={'Étape ' + Math.min(step, total) + '/' + total + ' — ' + (LABEL[screen] || '')}
+        onBack={back}
+        right={<div style={{background:'rgba(107,31,42,.08)', border:'1px solid ' + C.bord, borderRadius:50, padding:'4px 12px', fontSize:12, color:C.wine}}>{count} vins</div>}/>
       <div style={{background:C.bg2, padding:'0 18px 12px', display:'flex', gap:4}}>
-        {[1,2,3].map(i=><div key={i} style={{flex:1, height:3, borderRadius:2, background:step>=i?C.gold:'rgba(107,31,42,.15)', transition:'background .3s'}}/>)}
+        {Array.from({length: total}, (_, i) => i + 1).map(i => <div key={i} style={{flex:1, height:3, borderRadius:2, background: step >= i ? C.gold : 'rgba(107,31,42,.15)', transition:'background .3s'}}/>)}
       </div>
       <div style={{maxWidth:520, margin:'0 auto', padding:'20px 16px'}}>
-        {step===1 && (
+
+        {screen === 'occasion' && (
           <div>
-            <h2 style={{...serif, fontSize:'clamp(1.5rem,4vw,2rem)', color:C.wine, textAlign:'center', marginBottom:20}}>Quel type de vin vous attire ?</h2>
-            <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:12}}>
-              {TYPES.map(t=>(
-                <div key={t.id} onClick={()=>pickType(t.id)} style={{background:t.bg, border:'2px solid '+(type===t.id?t.color:'transparent'), borderRadius:16, padding:'20px 14px', textAlign:'center', cursor:'pointer', transition:'all .25s', boxShadow:type===t.id?'0 4px 18px '+t.color+'33':'0 2px 8px rgba(107,31,42,.05)'}}
-                  onMouseEnter={e=>{e.currentTarget.style.borderColor=t.color;e.currentTarget.style.transform='translateY(-2px)';}}
-                  onMouseLeave={e=>{if(type!==t.id){e.currentTarget.style.borderColor='transparent';e.currentTarget.style.transform='translateY(0)';}}}>
-                  <div style={{marginBottom:8, display:'flex', justifyContent:'center'}}><TypeIcon id={t.id} color={t.color} size={38}/></div>
-                  <div style={{...serif, fontSize:19, color:type===t.id?t.color:C.wine, fontWeight:700, marginBottom:4}}>{t.label}</div>
-                  <div style={{fontSize:12, color:C.muted}}>{t.desc}</div>
-                </div>
-              ))}
+            {titre('Je cherche un vin pour…')}
+            <div style={{display:'grid', gridTemplateColumns:'1fr', gap:10, maxWidth:440, margin:'0 auto'}}>
+              {OCCASIONS_UI.map(o => <Carte key={o.id} label={o.label} desc={o.desc} icon={<OccasionIcon id={o.id}/>} onClick={() => pickOccasion(o.id)}/>)}
             </div>
           </div>
         )}
-        {step===2 && (
+
+        {screen === 'gout' && (
           <div>
-            <h2 style={{...serif, fontSize:'clamp(1.5rem,4vw,2rem)', color:C.wine, textAlign:'center', marginBottom:20}}>Quel est votre budget ?</h2>
+            {titre(occasion === 'offrir' ? 'Connaissez-vous ses goûts ?' : "Qu'aimez-vous dans un vin ?")}
+            <div style={{display:'grid', gridTemplateColumns:'1fr', gap:9, maxWidth:440, margin:'0 auto'}}>
+              {goutsOrdre.map(g => <Carte key={g.id} label={g.label} desc={g.desc} accent={g.id === 'inconnu'} onClick={() => pickGout(g.id)}/>)}
+            </div>
+          </div>
+        )}
+
+        {screen === 'plat' && (
+          <div>
+            {titre("Qu'allez-vous manger ?")}
+            <div style={{display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:9}}>
+              {platsOpts.map(p => (
+                <div key={p.id} onClick={() => pickPairing(p.id)} style={{background:PAIRING_BG[p.id] || C.cream, border:'1.5px solid ' + C.bord, borderRadius:12, padding:'12px 6px', textAlign:'center', cursor:'pointer', transition:'all .2s'}}
+                  onMouseEnter={e => { e.currentTarget.style.borderColor = PAIRING_COLORS[p.id] || C.gold; e.currentTarget.style.transform = 'scale(1.04)'; }}
+                  onMouseLeave={e => { e.currentTarget.style.borderColor = C.bord; e.currentTarget.style.transform = 'scale(1)'; }}>
+                  <div style={{marginBottom:4, display:'flex', justifyContent:'center'}}><PairingIcon id={p.id} size={24}/></div>
+                  <div style={{...serif, fontSize:12, color:C.wine}}>{p.label}</div>
+                </div>
+              ))}
+              <BoutonLibre label="Un autre plat ? Dites-le" onClick={ouvrirLibre}/>
+            </div>
+          </div>
+        )}
+
+        {screen === 'precision' && (
+          <div>
+            {titre('Comment est-il préparé ?')}
+            <div style={{textAlign:'center', fontSize:12, color:C.muted, marginTop:-12, marginBottom:18}}>Pour un accord plus juste — facultatif</div>
+            <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, maxWidth:440, margin:'0 auto'}}>
+              {(PAIRING_DETAILS[pairing] || []).map(d => (
+                <div key={d.id} onClick={() => pickDetail(d)} style={{background:C.cream, border:'1.5px solid ' + C.bord, borderRadius:12, padding:'14px 10px', textAlign:'center', cursor:'pointer', transition:'all .2s'}}
+                  onMouseEnter={e => { e.currentTarget.style.borderColor = C.gold; e.currentTarget.style.transform = 'scale(1.03)'; }}
+                  onMouseLeave={e => { e.currentTarget.style.borderColor = C.bord; e.currentTarget.style.transform = 'scale(1)'; }}>
+                  <div style={{...serif, fontSize:14, color:C.wine}}>{d.label}</div>
+                </div>
+              ))}
+              <div onClick={() => pickDetail(null)} style={{gridColumn:'1 / -1', background:'transparent', border:'1.5px dashed ' + C.bord, borderRadius:12, padding:'12px 10px', textAlign:'center', cursor:'pointer', color:C.muted, fontSize:13}}
+                onMouseEnter={e => e.currentTarget.style.borderColor = C.gold} onMouseLeave={e => e.currentTarget.style.borderColor = C.bord}>
+                Peu importe, laissez Gabriel choisir
+              </div>
+            </div>
+          </div>
+        )}
+
+        {screen === 'recette' && (
+          <div>
+            {titre('Quelle recette ?')}
+            <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, maxWidth:440, margin:'0 auto'}}>
+              {RECETTES_UI.map(r => (
+                <div key={r.id} onClick={() => pickRecette(r.id)} style={{background:C.cream, border:'1.5px solid ' + C.bord, borderRadius:12, padding:'15px 10px', textAlign:'center', cursor:'pointer', transition:'all .2s'}}
+                  onMouseEnter={e => { e.currentTarget.style.borderColor = C.gold; e.currentTarget.style.transform = 'scale(1.03)'; }}
+                  onMouseLeave={e => { e.currentTarget.style.borderColor = C.bord; e.currentTarget.style.transform = 'scale(1)'; }}>
+                  <div style={{...serif, fontSize:15, color:C.wine, fontWeight:600}}>{r.label}</div>
+                </div>
+              ))}
+              <BoutonLibre label="Une autre recette ? Dites-la" onClick={ouvrirLibre}/>
+            </div>
+          </div>
+        )}
+
+        {screen === 'libre' && (
+          <div style={{maxWidth:440, margin:'0 auto'}}>
+            {titre(occasion === 'cuisiner' ? 'Décrivez votre recette' : 'Décrivez votre plat')}
+            <div style={{background:C.cream, border:'1px solid ' + C.bord, borderRadius:15, padding:'18px 16px'}}>
+              <div style={{display:'flex', gap:8, alignItems:'center', marginBottom:12}}>
+                <input value={mic === 'listening' && transcript ? transcript : texte} onChange={e => setTexte(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && validerLibre()} autoFocus
+                  placeholder={occasion === 'cuisiner' ? 'Ex. : blanquette, poires au vin…' : 'Ex. : hachis parmentier, poulet basquaise…'}
+                  style={{flex:1, background:C.bg, border:'1.5px solid ' + C.bord, color:C.text, borderRadius:10, padding:'13px 14px', fontSize:16, outline:'none', fontFamily:'Montserrat,sans-serif'}}/>
+                <button onClick={toggle} title="Dicter" style={{width:46, height:46, borderRadius:'50%', border:'none', fontSize:19, cursor:'pointer', flexShrink:0, background: mic === 'listening' ? C.wine : 'rgba(107,31,42,.1)', color: mic === 'listening' ? '#fdf8f0' : C.wine}}>{mic === 'listening' ? '✅' : '🎙'}</button>
+              </div>
+              {mic === 'listening' && <div style={{fontSize:11, color:C.wine, marginBottom:10, textAlign:'center'}}>Parlez… appuyez à nouveau sur le micro pour terminer</div>}
+              <button onClick={validerLibre} disabled={!(texte || '').trim()} style={{width:'100%', background:(texte || '').trim() ? C.wine : 'rgba(107,31,42,.25)', color:'#fdf8f0', border:'none', borderRadius:50, padding:'12px', cursor:(texte || '').trim() ? 'pointer' : 'default', fontFamily:'Montserrat,sans-serif', fontSize:14, fontWeight:600}}>Valider</button>
+            </div>
+          </div>
+        )}
+
+        {screen === 'budget' && (
+          <div>
+            {titre('Quel est votre budget ?')}
             <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, maxWidth:420, margin:'0 auto'}}>
-              {BUDGETS.map(b=>(
-                <div key={b.id} onClick={()=>pickBudget(b.id)} style={{background:budget===b.id?'#fef9ed':C.cream, border:'2px solid '+(budget===b.id?C.gold:C.bord), borderRadius:14, padding:17, textAlign:'center', cursor:'pointer', transition:'all .25s'}}
-                  onMouseEnter={e=>e.currentTarget.style.borderColor=C.gold}
-                  onMouseLeave={e=>{if(budget!==b.id)e.currentTarget.style.borderColor=C.bord;}}>
-                  <div style={{...serif, fontSize:19, fontWeight:700, color:budget===b.id?C.light:C.wine, marginBottom:4}}>{b.label}</div>
+              {BUDGETS.map(b => (
+                <div key={b.id} onClick={() => pickBudget(b.id)} style={{background:budget === b.id ? '#fef9ed' : C.cream, border:'2px solid ' + (budget === b.id ? C.gold : C.bord), borderRadius:14, padding:17, textAlign:'center', cursor:'pointer', transition:'all .25s'}}
+                  onMouseEnter={e => e.currentTarget.style.borderColor = C.gold}
+                  onMouseLeave={e => { if (budget !== b.id) e.currentTarget.style.borderColor = C.bord; }}>
+                  <div style={{...serif, fontSize:19, fontWeight:700, color:budget === b.id ? C.light : C.wine, marginBottom:4}}>{b.label}</div>
                   <div style={{fontSize:12, color:C.muted}}>{b.desc}</div>
                 </div>
               ))}
             </div>
           </div>
         )}
-        {step===3 && !thinking && !awaitingDetail && (
+
+        {screen === 'couleur' && (
           <div>
-            <h2 style={{...serif, fontSize:'clamp(1.3rem,3.5vw,1.9rem)', color:C.wine, textAlign:'center', marginBottom:18}}>Avec quel plat ?</h2>
-            <div style={{display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:9}}>
-              {pairingOpts.map(p=>(
-                <div key={p.id} onClick={()=>choosePairing(p.id)} style={{background:PAIRING_BG[p.id]||C.cream, border:'1.5px solid '+C.bord, borderRadius:12, padding:'12px 6px', textAlign:'center', cursor:'pointer', transition:'all .2s'}}
-                  onMouseEnter={e=>{e.currentTarget.style.borderColor=PAIRING_COLORS[p.id]||C.gold;e.currentTarget.style.transform='scale(1.04)';}}
-                  onMouseLeave={e=>{e.currentTarget.style.borderColor=C.bord;e.currentTarget.style.transform='scale(1)';}}>
-                  <div style={{marginBottom:4, display:'flex', justifyContent:'center'}}><PairingIcon id={p.id} size={24}/></div>
-                  <div style={{...serif, fontSize:12, color:C.wine}}>{p.label}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-        {step===3 && !thinking && awaitingDetail && (
-          <div>
-            <h2 style={{...serif, fontSize:'clamp(1.3rem,3.5vw,1.9rem)', color:C.wine, textAlign:'center', marginBottom:6}}>Une précision ?</h2>
-            <div style={{textAlign:'center', fontSize:12, color:C.muted, marginBottom:18}}>Pour un accord plus juste — facultatif</div>
-            <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, maxWidth:440, margin:'0 auto'}}>
-              {(PAIRING_DETAILS[pairing]||[]).map(d=>(
-                <div key={d.id} onClick={()=>runSelection(pairing, d.label)} style={{background:C.cream, border:'1.5px solid '+C.bord, borderRadius:12, padding:'14px 10px', textAlign:'center', cursor:'pointer', transition:'all .2s'}}
-                  onMouseEnter={e=>{e.currentTarget.style.borderColor=C.gold;e.currentTarget.style.transform='scale(1.03)';}}
-                  onMouseLeave={e=>{e.currentTarget.style.borderColor=C.bord;e.currentTarget.style.transform='scale(1)';}}>
-                  <div style={{...serif, fontSize:14, color:C.wine}}>{d.label}</div>
-                </div>
-              ))}
-              <div onClick={()=>runSelection(pairing, null)} style={{gridColumn:'1 / -1', background:'transparent', border:'1.5px dashed '+C.bord, borderRadius:12, padding:'12px 10px', textAlign:'center', cursor:'pointer', color:C.muted, fontSize:13, transition:'all .2s'}}
-                onMouseEnter={e=>e.currentTarget.style.borderColor=C.gold}
-                onMouseLeave={e=>e.currentTarget.style.borderColor=C.bord}>
-                Peu importe, laissez Gabriel choisir
+            {titre('Avez-vous une préférence ?')}
+            <div style={{maxWidth:420, margin:'0 auto'}}>
+              <div style={{marginBottom:12}}>
+                <Carte label="Peu importe, conseillez-moi" desc="Gabriel choisit la couleur qui va le mieux" accent={true} onClick={() => pickCouleur(null)}/>
+              </div>
+              <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:12}}>
+                {TYPES.map(t => (
+                  <div key={t.id} onClick={() => pickCouleur(t.id)} style={{background:t.bg, border:'2px solid transparent', borderRadius:16, padding:'18px 14px', textAlign:'center', cursor:'pointer', transition:'all .25s', boxShadow:'0 2px 8px rgba(107,31,42,.05)'}}
+                    onMouseEnter={e => { e.currentTarget.style.borderColor = t.color; e.currentTarget.style.transform = 'translateY(-2px)'; }}
+                    onMouseLeave={e => { e.currentTarget.style.borderColor = 'transparent'; e.currentTarget.style.transform = 'translateY(0)'; }}>
+                    <div style={{marginBottom:6, display:'flex', justifyContent:'center'}}><TypeIcon id={t.id} color={t.color} size={34}/></div>
+                    <div style={{...serif, fontSize:18, color:C.wine, fontWeight:700}}>{t.label}</div>
+                  </div>
+                ))}
               </div>
             </div>
           </div>
         )}
-        {step===3 && thinking && (
+
+        {screen === 'info' && info && (
+          <div style={{textAlign:'center', maxWidth:420, margin:'0 auto', padding:'30px 10px'}}>
+            <div style={{...serif, fontSize:21, color:C.wine, marginBottom:10}}>{'La recette « ' + info.plat + ' » ne contient généralement pas de vin.'}</div>
+            <p style={{fontSize:13, color:C.muted, lineHeight:1.7, marginBottom:22}}>Voulez-vous plutôt un vin pour accompagner ce plat ?</p>
+            <div style={{display:'flex', flexDirection:'column', gap:10}}>
+              <button onClick={() => { setOccasion('repas'); setPlatLibre(info.plat); run({occasion:'repas', platLibre:info.plat, couleur:null}); }}
+                style={{background:C.wine, color:'#fdf8f0', border:'none', borderRadius:50, padding:'12px 22px', cursor:'pointer', fontFamily:'Montserrat,sans-serif', fontSize:14, fontWeight:600}}>Oui, un vin pour accompagner ce plat</button>
+              <button onClick={() => { setInfo(null); setHist(h => h.filter(s => s !== 'thinking')); setScreen('recette'); }}
+                style={{background:'transparent', color:C.wine, border:'1.5px solid ' + C.bord2, borderRadius:50, padding:'11px 22px', cursor:'pointer', fontFamily:'Montserrat,sans-serif', fontSize:13}}>Changer de recette</button>
+            </div>
+          </div>
+        )}
+
+        {screen === 'thinking' && (
           <div style={{textAlign:'center', padding:'50px 20px'}}>
             <div style={{fontSize:42, marginBottom:14, animation:'pulse 1.4s ease-in-out infinite'}}>🍷</div>
             <div style={{...serif, fontSize:18, color:C.wine}}>Gabriel choisit vos vins...</div>
-            <div style={{fontSize:12, color:C.muted, marginTop:6}}>Il compare cépages, régions et accords pour ce plat</div>
+            <div style={{fontSize:12, color:C.muted, marginTop:6}}>
+              {occasion === 'cuisiner' ? 'Il cherche le vin qui convient à votre recette'
+                : occasion === 'repas' ? 'Il compare cépages, régions et accords pour votre plat'
+                : 'Il compare les styles et les appellations selon vos goûts'}
+            </div>
             <style>{'@keyframes pulse{0%,100%{opacity:1;transform:scale(1);}50%{opacity:.6;transform:scale(1.08);}}'}</style>
           </div>
         )}
@@ -1265,6 +1455,7 @@ function Results({results, setView, collector}) {
           </div>
           <h2 style={{...serif, fontSize:'clamp(1.4rem,3.5vw,1.9rem)', color:C.wine, margin:'8px 0 4px'}}>Sélection personnalisée</h2>
           <p style={{fontSize:12, color:C.muted}}>Cliquez sur une carte pour la retourner · Collectionnez après achat</p>
+          {results.message && <div style={{margin:'10px auto 0', maxWidth:420, background:'#fef9ed', border:'1px solid '+C.bord2, borderRadius:10, padding:'8px 12px', fontSize:12, color:C.wine, lineHeight:1.5}}>💡 {results.message}</div>}
         </div>
         <div style={{display:'flex', justifyContent:'center', gap:12, marginBottom:22, flexWrap:'wrap'}}>
           {results.map((w,i) => (
