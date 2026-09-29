@@ -704,7 +704,11 @@ app.post('/selection-accord', rateLimit(30), async (req, res) => {
   // Nouveau parcours « Je cherche un vin pour… » : l'écran envoie une occasion.
   // Sans occasion (ancienne version de l'écran), on garde l'ancien fonctionnement ci-dessous.
   if (ACCORDS && req.body.occasion) {
-    return ACCORDS.selectionGuidee(req.body, bracket, featuredSet, res, { catalogue: WINES_CATALOG, callApi, config: CONFIG });
+    return ACCORDS.selectionGuidee(req.body, bracket, featuredSet, res, { catalogue: WINES_CATALOG, callApi, config: CONFIG })
+      .catch(e => {
+        console.error('Erreur moteur parcours guidé:', e.message);
+        if (!res.headersSent) res.status(500).json({ error: 'parcours guidé indisponible' });
+      });
   }
 
   // ── Constitution du vivier, avec replis progressifs (même logique que
@@ -821,7 +825,7 @@ app.post('/selection-accord', rateLimit(30), async (req, res) => {
       payload,
     });
     const data = JSON.parse(raw);
-    if (data.error) throw new Error(data.error.message || 'erreur API Mistral');
+    if (data.error || !data.choices || !data.choices.length) throw new Error((data.error && data.error.message) || data.message || 'réponse API inattendue');
     const text = data.choices[0].message.content.trim();
     const m = text.match(/\{[\s\S]*\}/);
     return JSON.parse(m ? m[0] : text);
@@ -861,13 +865,37 @@ app.post('/selection-accord', rateLimit(30), async (req, res) => {
 });
 
 // ── Helper HTTPS ──────────────────────────────────────────────────────────────
-function callApi({ hostname, path, headers, payload }) {
+// Rejette toute réponse non-2xx avec le message de Mistral : avant, une erreur
+// (429, 401, 5xx…) arrivait sans champ "choices" et faisait planter
+// data.choices[0] avec un message incompréhensible. Un 429 ou 5xx est retenté
+// une fois après 1,5 s (pic de trafic ponctuel).
+function callApi({ hostname, path, headers, payload }, tentative = 1) {
   return new Promise((resolve, reject) => {
-    const req = https.request({ hostname, path, method: 'POST', headers }, apiRes => {
+    const req = https.request({ hostname, path, method: 'POST', headers, timeout: 30000 }, apiRes => {
       let data = '';
+      apiRes.setEncoding('utf-8'); // évite de casser un accent coupé entre deux paquets
       apiRes.on('data', c => data += c);
-      apiRes.on('end', () => resolve(data));
+      apiRes.on('end', () => {
+        const status = apiRes.statusCode;
+        if (status >= 200 && status < 300) return resolve(data);
+
+        let detail = '';
+        try {
+          const j = JSON.parse(data);
+          detail = j.message || (j.error && j.error.message) || '';
+          if (typeof detail !== 'string') detail = JSON.stringify(detail).slice(0, 200);
+        } catch (e) { detail = data.slice(0, 200); }
+
+        if ((status === 429 || status >= 500) && tentative < 2) {
+          console.warn('⚠️  Mistral HTTP ' + status + ' → nouvel essai dans 1,5 s');
+          return setTimeout(() => {
+            callApi({ hostname, path, headers, payload }, tentative + 1).then(resolve, reject);
+          }, 1500);
+        }
+        reject(new Error('Mistral HTTP ' + status + (detail ? ' — ' + detail : '')));
+      });
     });
+    req.on('timeout', () => req.destroy(new Error('Mistral : délai de 30 s dépassé')));
     req.on('error', reject);
     req.write(payload);
     req.end();

@@ -89,7 +89,7 @@ const cacheAnalyse = new Map();
 
 function nettoyer(d) {
   const n = (v, lo, hi, def) => { const x = parseInt(v, 10); return isNaN(x) ? def : Math.max(lo, Math.min(hi, x)); };
-  const s = v => String(v || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim();
+  const s = v => String(v || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
   const dans = (v, liste, def) => { const x = s(v); return liste.map(s).includes(x) ? x : def; };
   const couleur = d.couleur_demandee ? String(d.couleur_demandee).toLowerCase().replace('rose', 'rosé').replace('roséé', 'rosé') : null;
   return {
@@ -827,7 +827,7 @@ async function selectionGuidee(body, bracket, featuredSet, res, env) {
       payload,
     });
     const data = JSON.parse(raw);
-    if (data.error) throw new Error(data.error.message || 'erreur API Mistral');
+    if (data.error || !data.choices || !data.choices.length) throw new Error((data.error && data.error.message) || data.message || 'réponse API inattendue');
     const text = data.choices[0].message.content.trim();
     const m = text.match(/\{[\s\S]*\}/);
     return JSON.parse(m ? m[0] : text);
