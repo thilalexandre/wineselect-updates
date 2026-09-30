@@ -16,7 +16,9 @@
 <script type="text/babel">
 const { useState, useEffect, useRef, useCallback, useMemo } = React;
 const WINES = window.WINES_DATA;
-const CATALOG = window.CATALOG_DATA;
+// Version allégée du catalogue pour le sommelier : reconstruite depuis WINES si le fichier
+// du catalogue ne la fournit pas (sinon l'application ne démarre pas).
+const CATALOG = window.CATALOG_DATA || (WINES || []).map(w => ({id:w.id, name:w.name, type:w.type, price:w.price, region:w.region, grape:w.grape, pairings:w.pairings, rating:w.rating}));
 // Application des stocks/prix importés via CSV (admin)
 try {
   const ov = JSON.parse(localStorage.getItem('ws_stock_overrides')||'[]');
@@ -1069,9 +1071,9 @@ function Home({setView, collector, customerApi}) {
 
 // ── SELECTION ─────────────────────────────────────────────────────────────────
 // Parcours guidé « Je cherche un vin pour… » (PARCOURS_GUIDE_V2)
-//   … l'apéritif           → Qu'aimez-vous dans un vin ? → budget
+//   … l'apéritif           → Quel type de vin ? → Qu'aimez-vous dans un vin ? → budget
 //   … accompagner un repas → Qu'allez-vous manger ? (→ Comment est-il préparé ?) → budget → Avez-vous une préférence ?
-//   … offrir               → Connaissez-vous ses goûts ? → budget
+//   … offrir               → Quel type de vin ? → Connaissez-vous ses goûts ? → budget
 //   … cuisiner avec        → Quelle recette ? → budget
 // Le choix des vins est fait par le serveur (/selection-accord, moteur d'accords).
 const OCCASIONS_UI = [
@@ -1087,6 +1089,34 @@ const GOUTS_UI = [
   {id:'doux',            label:'Doux',               desc:'Une touche sucrée'},
   {id:'inconnu',         label:'Je ne sais pas',     desc:'Laissez Gabriel vous guider'},
 ];
+// Cadeau : « Je ne sais pas » formulé pour la personne qui reçoit
+const GOUTS_OFFRIR_INCONNU = {id:'inconnu', label:'Je ne connais pas ses goûts', desc:'Gabriel choisit une valeur sûre'};
+// Apéritif et cadeau : goûts propres à la couleur choisie (le moteur d'accords les connaît sous ces id)
+const GOUTS_PAR_COULEUR = {
+  rouge: [
+    {id:'rouge_leger',    label:'Léger et fruité',        desc:'Fruits rouges croquants, à servir frais'},
+    {id:'rouge_rond',     label:'Rond et gourmand',       desc:'Fruit mûr, tanins soyeux'},
+    {id:'rouge_puissant', label:'Puissant et charpenté',  desc:'De la matière et de la structure'},
+  ],
+  blanc: [
+    {id:'blanc_vif',        label:'Vif et minéral',        desc:'Tendu, citronné, désaltérant'},
+    {id:'blanc_aromatique', label:'Aromatique et fruité',  desc:'Fleurs blanches, fruits exotiques'},
+    {id:'blanc_beurre',     label:'Rond et beurré',        desc:'Chardonnay, notes de beurre et de brioche'},
+    {id:'blanc_moelleux',   label:'Moelleux ou liquoreux', desc:'Une douceur fruitée'},
+  ],
+  'rosé': [
+    {id:'rose_pale',   label:'Pâle et léger',          desc:'Sec, délicat, très frais'},
+    {id:'rose_fruite', label:'Fruité et gourmand',     desc:'Fraise, framboise, tout en rondeur'},
+    {id:'rose_vineux', label:'Soutenu, de caractère',  desc:'Plus coloré, de la matière'},
+    {id:'rose_tendre', label:'Tendre, une pointe de douceur', desc:'Demi-sec, fruité et gourmand'},
+  ],
+  bulles: [
+    {id:'bulles_vives',    label:'Vives et légères',       desc:'Brut, tendues, désaltérantes'},
+    {id:'bulles_fruitees', label:'Fruitées et gourmandes', desc:'Fruit frais, bulle fine'},
+    {id:'bulles_vineuses', label:'Vineuses et briochées',  desc:'De la matière, notes de brioche grillée'},
+    {id:'bulles_douces',   label:'Douces',                 desc:'Demi-sec, une touche sucrée'},
+  ],
+};
 const RECETTES_UI = [
   {id:'bourguignon', label:'Bœuf bourguignon',          couleur:'rouge'},
   {id:'coq_au_vin',  label:'Coq au vin',                couleur:'rouge'},
@@ -1144,12 +1174,17 @@ function Selection({setView, setResults}) {
     setHist(h => h.slice(0, -1));
   };
 
-  const total = occasion === 'repas' ? 4 : 3;
-  const STEP = {occasion:1, gout:2, plat:2, precision:2, libre:2, recette:2, budget:3, couleur:4, info:2, thinking:total};
+  const apero = occasion === 'aperitif';
+  const offrir = occasion === 'offrir';
+  const typeDabord = apero || offrir;   // la couleur est demandée avant les goûts
+  const total = occasion === 'repas' || typeDabord ? 4 : 3;
+  const STEP = typeDabord
+    ? {occasion:1, couleur:2, gout:3, budget:4, thinking:total}
+    : {occasion:1, gout:2, plat:2, precision:2, libre:2, recette:2, budget:3, couleur:4, info:2, thinking:total};
   const LABEL = {
     occasion:'Occasion', gout: occasion === 'offrir' ? 'Ses goûts' : 'Vos goûts', plat:'Votre plat',
     precision:'Préparation', libre: occasion === 'cuisiner' ? 'Votre recette' : 'Votre plat',
-    recette:'Votre recette', budget:'Budget', couleur:'Préférence', info:'Votre recette', thinking:'Sélection',
+    recette:'Votre recette', budget:'Budget', couleur: typeDabord ? 'Type de vin' : 'Préférence', info:'Votre recette', thinking:'Sélection',
   };
   const step = STEP[screen] || 1;
   const count = filterWines(couleur, budget, null).length;
@@ -1158,7 +1193,7 @@ function Selection({setView, setResults}) {
   const pickOccasion = o => {
     setOccasion(o); setGout(null); setPairing(null); setDetail(null); setPlatLibre('');
     setRecette(null); setRecetteLibre(''); setCouleur(null); setTexte('');
-    go(o === 'repas' ? 'plat' : o === 'cuisiner' ? 'recette' : 'gout');
+    go(o === 'repas' ? 'plat' : o === 'cuisiner' ? 'recette' : 'couleur');
   };
   const pickGout = g => { setGout(g); go('budget'); };
   const pickPairing = p => {
@@ -1180,7 +1215,12 @@ function Selection({setView, setResults}) {
     if (occasion === 'repas') go('couleur');
     else run({budget:b});
   };
-  const pickCouleur = c => { setCouleur(c); run({couleur:c}); };
+  // Apéritif et cadeau : le type de vin est la première question, on enchaîne ensuite sur les goûts.
+  const pickCouleur = c => {
+    setCouleur(c);
+    if (typeDabord) { setGout(null); go('gout'); }
+    else run({couleur:c});
+  };
 
   // ── Repli local si le serveur ne répond pas ──────────────────────────────
   const withFallbackRoles = wines => {
@@ -1251,7 +1291,12 @@ function Selection({setView, setResults}) {
       {label}
     </div>
   );
-  const goutsOrdre = occasion === 'offrir' ? [GOUTS_UI[4]].concat(GOUTS_UI.slice(0,4)) : GOUTS_UI;
+  // Couleur choisie : les goûts de cette couleur. Pour un cadeau, « Je ne sais pas » passe en premier
+  // (on connaît rarement les goûts précis de la personne).
+  const inconnu = offrir ? GOUTS_OFFRIR_INCONNU : GOUTS_UI[4];
+  const goutsCouleur = typeDabord && GOUTS_PAR_COULEUR[couleur];
+  const goutsOrdre = goutsCouleur ? (offrir ? [inconnu].concat(goutsCouleur) : goutsCouleur.concat([inconnu]))
+    : offrir ? [inconnu].concat(GOUTS_UI.slice(0,4)) : GOUTS_UI;
   const platsOpts = PAIRINGS.filter(p => p.id !== 'apéritif');
 
   return (
@@ -1275,7 +1320,10 @@ function Selection({setView, setResults}) {
 
         {screen === 'gout' && (
           <div>
-            {titre(occasion === 'offrir' ? 'Connaissez-vous ses goûts ?' : "Qu'aimez-vous dans un vin ?")}
+            {titre(offrir ? (couleur ? 'Connaissez-vous ses goûts en ' + couleur + ' ?' : 'Connaissez-vous ses goûts ?')
+              : apero && couleur === 'bulles' ? 'Quel style de bulles ?'
+              : apero && couleur ? 'Quel style de ' + couleur + ' ?'
+              : "Qu'aimez-vous dans un vin ?")}
             <div style={{display:'grid', gridTemplateColumns:'1fr', gap:9, maxWidth:440, margin:'0 auto'}}>
               {goutsOrdre.map(g => <Carte key={g.id} label={g.label} desc={g.desc} accent={g.id === 'inconnu'} onClick={() => pickGout(g.id)}/>)}
             </div>
@@ -1370,10 +1418,10 @@ function Selection({setView, setResults}) {
 
         {screen === 'couleur' && (
           <div>
-            {titre('Avez-vous une préférence ?')}
+            {titre(offrir ? 'Quel type de vin offrir ?' : apero ? 'Quel type de vin ?' : 'Avez-vous une préférence ?')}
             <div style={{maxWidth:420, margin:'0 auto'}}>
               <div style={{marginBottom:12}}>
-                <Carte label="Peu importe, conseillez-moi" desc="Gabriel choisit la couleur qui va le mieux" accent={true} onClick={() => pickCouleur(null)}/>
+                <Carte label={offrir ? 'Je ne sais pas, conseillez-moi' : 'Peu importe, conseillez-moi'} desc={offrir ? 'Gabriel choisit une valeur sûre, qui fait plaisir' : 'Gabriel choisit la couleur qui va le mieux'} accent={true} onClick={() => pickCouleur(null)}/>
               </div>
               <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:12}}>
                 {TYPES.map(t => (

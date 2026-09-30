@@ -500,7 +500,33 @@ const GOUTS = {
   riche_intense:   'riche et intense',
   doux:            'doux',
   inconnu:         'sans préférence',
+  // Goûts propres à une couleur (apéritif : la couleur est choisie avant les goûts)
+  rouge_leger:     'un rouge léger et fruité, à servir frais',
+  rouge_rond:      'un rouge rond et gourmand, aux tanins soyeux',
+  rouge_puissant:  'un rouge puissant et charpenté',
+  blanc_vif:       'un blanc vif et minéral',
+  blanc_aromatique:'un blanc aromatique et fruité',
+  blanc_beurre:    'un blanc rond et beurré (type Chardonnay élevé en fût)',
+  blanc_moelleux:  'un blanc moelleux ou liquoreux',
+  rose_pale:       'un rosé pâle et léger',
+  rose_fruite:     'un rosé fruité et gourmand',
+  rose_vineux:     'un rosé soutenu, de caractère',
+  rose_tendre:     'un rosé tendre, avec une pointe de douceur',
+  bulles_vives:    'des bulles vives et légères',
+  bulles_fruitees: 'des bulles fruitées et gourmandes',
+  bulles_vineuses: 'des bulles vineuses et briochées',
+  bulles_douces:   'des bulles douces',
 };
+// Couleur de chaque goût propre à une couleur
+const GOUT_COULEUR = {
+  rouge_leger: 'rouge', rouge_rond: 'rouge', rouge_puissant: 'rouge',
+  blanc_vif: 'blanc', blanc_aromatique: 'blanc', blanc_beurre: 'blanc', blanc_moelleux: 'blanc',
+  rose_pale: 'rosé', rose_fruite: 'rosé', rose_vineux: 'rosé', rose_tendre: 'rosé',
+  bulles_vives: 'bulles', bulles_fruitees: 'bulles', bulles_vineuses: 'bulles', bulles_douces: 'bulles',
+};
+// Goûts qui assument l'ampleur, les tanins ou le sucre (pas de pénalité apéritif sur ces points)
+const GOUTS_AMPLES = ['riche_intense', 'rouge_puissant', 'blanc_beurre', 'rose_vineux', 'bulles_vineuses'];
+const GOUTS_DOUX = ['doux', 'blanc_moelleux', 'bulles_douces', 'rose_tendre'];
 
 function noterStyle(wine, gout, occasion) {
   const p = wine.profil || (wine.profil = profilerVin(wine));
@@ -510,8 +536,97 @@ function noterStyle(wine, gout, occasion) {
   const add = (v, r) => { s += v; if (r) (v >= 0 ? plus : moins).push(r); };
   const tanins = t === 'rouge' ? p.tanins : 0;
   const fruit = p.fruit || 0;
+  const sec = () => { if (p.sucrosite >= 2) add(-20, null); else if (p.sucrosite === 1) add(-6, null); };
 
-  if (gout === 'leger_frais') {
+  if (GOUT_COULEUR[gout] && GOUT_COULEUR[gout] !== t) return { score: -100, plus: [], moins: ['pas la couleur choisie'] };
+
+  if (gout === 'rouge_leger') {
+    add([0, 22, 4, -20][p.corps], p.corps === 1 ? 'léger et digeste' : null);
+    add(tanins <= 1 ? 12 : tanins === 3 ? -20 : -6, tanins <= 1 ? 'tanins souples' : null);
+    if (p.fraicheur === 3) add(10, 'se sert frais');
+    if (fruit === 1) add(6, 'fruit croquant');
+    if (p.boise === 2) add(-12, null);
+    sec();
+  } else if (gout === 'rouge_rond') {
+    add([0, 2, 20, 4][p.corps], p.corps === 2 ? 'rond et gourmand' : null);
+    if (fruit >= 2) add(14, 'fruit mûr');
+    add(tanins <= 2 ? 6 : -12, null);
+    sec();
+  } else if (gout === 'rouge_puissant') {
+    add([0, -20, 4, 20][p.corps], p.corps === 3 ? 'puissant, de la matière' : null);
+    if (tanins >= 2) add(12, 'belle charpente');
+    if (p.intensite === 3) add(8, null);
+    if (p.boise >= 1) add(4, null);
+    sec();
+  } else if (gout === 'blanc_vif') {
+    add([0, 8, 12, 2][p.fraicheur], p.fraicheur === 3 ? 'vif et tendu' : null);
+    if (p.fraicheur === 3) add(8, null);
+    if (p.mineralite >= 2) add(12, 'minéral');
+    if (p.texture === 1) add(8, null);
+    if (p.aromatique === 3) add(-8, null);
+    if (p.boise >= 1) add(-10, null);
+    sec();
+  } else if (gout === 'blanc_aromatique') {
+    add([0, -10, 12, 22][p.aromatique || 0], p.aromatique === 3 ? 'très aromatique' : p.aromatique === 2 ? 'fruité' : null);
+    if (p.boise === 2) add(-10, null);
+    if (p.oxydatif) add(-15, null);
+    if (p.sucrosite >= 2) add(-15, null);
+  } else if (gout === 'blanc_beurre') {
+    // Le « beurré » des clients : Chardonnay rond, élevé en fût (malolactique, notes de beurre et de brioche)
+    if (p.sucrosite >= 2) return { score: -100, plus: [], moins: ['vin doux'] };
+    add([0, -15, 10, 16][p.texture || 0], p.texture >= 2 ? 'rond et gras' : null);
+    add([0, -10, 4, 8][p.corps], null);
+    add([0, 14, 18][p.boise || 0], p.boise >= 1 ? 'élevé en fût, notes beurrées' : null);
+    if (/chardonnay/i.test(wine.grape || '')) add(10, p.boise ? null : 'Chardonnay rond');
+    if (p.aromatique === 3) add(-15, null);
+    if (p.oxydatif || /savagnin/i.test(wine.grape || '')) add(-25, null);   // noix, curry : pas le « beurré » attendu
+    if (p.fraicheur === 3 && p.texture === 1) add(-10, null);
+    sec();
+  } else if (gout === 'blanc_moelleux') {
+    if (p.sucrosite === 0) return { score: -100, plus: [], moins: ['vin sec'] };
+    add([0, 12, 20, 18][p.sucrosite], 'une douceur comme demandé');
+    if (p.fraicheur >= 2) add(6, 'une douceur équilibrée par la fraîcheur');
+  } else if (gout === 'rose_pale') {
+    add(p.style === 1 ? 24 : p.style === 2 ? 4 : -15, p.style === 1 ? 'pâle et délicat' : null);
+    if (p.corps === 1) add(8, null);
+    if (p.fraicheur === 3) add(6, 'belle fraîcheur');
+    sec();
+  } else if (gout === 'rose_fruite') {
+    add(p.style === 2 ? 22 : 2, p.style === 2 ? 'fruité et gourmand' : null);
+    if (fruit >= 2) add(8, null);
+    if (p.sucrosite >= 2) add(-15, null);
+  } else if (gout === 'rose_vineux') {
+    add(p.style === 3 ? 24 : p.style === 2 ? 4 : -12, p.style === 3 ? 'soutenu, de caractère' : null);
+    if (p.corps >= 2) add(8, null);
+    sec();
+  } else if (gout === 'rose_tendre') {
+    // Peu de rosés demi-secs en rayon (Anjou) : ils passent en tête, complétés par les rosés les plus fruités
+    if (p.sucrosite >= 1) add(35, 'une pointe de douceur');
+    else {
+      if (p.style === 2) add(10, 'fruité et tendre');
+      if (fruit >= 2) add(6, null);
+      if (p.fraicheur === 3) add(-6, null);
+      if (p.style === 3) add(-10, null);
+    }
+  } else if (gout === 'bulles_vives') {
+    if (p.dosage >= 2) return { score: -100, plus: [], moins: ['bulles douces'] };
+    if (p.fraicheur === 3) add(14, 'vives et désaltérantes');
+    add([0, 12, 6, -12][p.vinosite || 0], p.vinosite === 1 ? 'légères' : null);
+    if (p.dosage === 0) add(4, null);
+  } else if (gout === 'bulles_fruitees') {
+    if (p.dosage >= 2) add(p.dosage >= 3 ? -15 : -10, null);   // les bulles douces ont leur propre choix
+    if (p.evolution === 1) add(18, 'fruit frais');
+    if (p.aromatique >= 2) add(6, null);
+    if (p.vinosite === 3) add(-6, null);
+  } else if (gout === 'bulles_vineuses') {
+    if (p.dosage >= 2) return { score: -100, plus: [], moins: ['bulles douces'] };
+    add([0, -15, 6, 20][p.vinosite || 0], p.vinosite === 3 ? 'vineuses, de la matière' : null);
+    if (p.evolution === 2) add(14, 'notes briochées');
+  } else if (gout === 'bulles_douces') {
+    if (p.dosage < 2 && p.sucrosite === 0) return { score: -100, plus: [], moins: ['bulles sèches'] };
+    add(20, 'une douceur comme demandé');
+    if (p.aromatique >= 2) add(6, null);
+  } else if (gout === 'leger_frais') {
     add([0, 20, 6, -15][p.corps], p.corps === 1 ? 'léger comme demandé' : null);
     if (p.fraicheur === 3) add(15, 'belle fraîcheur');
     if (t === 'rouge') add(tanins <= 1 ? 8 : tanins === 3 ? -20 : -5, tanins <= 1 ? 'tanins souples' : null);
@@ -544,10 +659,10 @@ function noterStyle(wine, gout, occasion) {
 
   if (occasion === 'aperitif') {
     add({ bulles: 10, blanc: 6, 'rosé': 6, rouge: 0 }[t] || 0, t === 'bulles' ? 'bulles, l\'apéritif par excellence' : null);
-    if (tanins === 3) add(-12, 'trop tannique sans rien à manger');
-    if (p.boise === 2) add(-8, null);
-    if (p.sucrosite === 3 && gout !== 'doux') add(-12, null);
-    if (p.corps === 3 && gout !== 'riche_intense') add(-8, null);
+    if (tanins === 3) add(gout === 'rouge_puissant' ? -4 : -12, gout === 'rouge_puissant' ? null : 'trop tannique sans rien à manger');
+    if (p.boise === 2 && !GOUTS_AMPLES.includes(gout)) add(-8, null);
+    if (p.sucrosite === 3 && !GOUTS_DOUX.includes(gout)) add(-12, null);
+    if (p.corps === 3 && !GOUTS_AMPLES.includes(gout)) add(-8, null);
   }
   if (occasion === 'offrir') {
     add(Math.round(((wine.rating || 85) - 85) * 1.5), (wine.rating || 0) >= 90 ? 'une cuvée reconnue, idéale à offrir' : null);
@@ -645,13 +760,37 @@ function noterRecette(wine, r) {
   return { score: Math.round(s), plus, moins };
 }
 
+// ── Message factuel du parcours guidé (budget, douceur) ─────────────────────
+// Écrit à partir des vins réellement retenus, pour ne jamais affirmer une chose fausse.
+function messageFaits(vins, demande) {
+  const liste = ws => ws.map(w => w.name).join(ws.length === 2 ? ' et ' : ', ');
+  const verbe = (ws, un, plusieurs) => ws.length > 1 ? plusieurs : un;
+  const b = demande.budget || { min: 0, max: Infinity };
+  const phrases = [];
+  if (demande.gout === 'rose_tendre') {
+    const doux = vins.filter(w => (w.profil || profilerVin(w)).sucrosite >= 1);
+    const secs = vins.filter(w => !doux.includes(w));
+    if (doux.length && secs.length) phrases.push(liste(doux) + verbe(doux, ' est le seul rosé demi-sec', ' sont les seuls rosés demi-secs') + ' du rayon ; ' +
+      liste(secs) + verbe(secs, ' est un rosé sec, choisi', ' sont des rosés secs, choisis') + ' pour son fruit gourmand.');
+    if (doux.some(w => w.price < b.min)) phrases.push('Les rosés tendres sont des vins accessibles : ' + verbe(doux, 'il coûte', 'ils coûtent') + ' moins que votre budget.');
+  } else {
+    const dessous = vins.filter(w => w.price < b.min);
+    const dessus = vins.filter(w => w.price > b.max);
+    if (dessus.length) phrases.push('Peu de vins de ce style dans votre budget : ' + liste(dessus) + verbe(dessus, ' le dépasse', ' le dépassent') + '.');
+    if (dessous.length) phrases.push(liste(dessous) + verbe(dessous, ' coûte', ' coûtent') + ' moins que votre budget : ce style est souvent plus accessible.');
+  }
+  return phrases.join(' ');
+}
+
 // ── Candidats du parcours guidé ─────────────────────────────────────────────
 // demande = { occasion, budget:{min,max}, couleur, plat?, gout?, recette?, featuredSet }
 function candidatsGuides(wines, demande) {
   const { occasion, budget, couleur } = demande;
   const featuredSet = demande.featuredSet || new Set();
   const ouvert = budget.max === Infinity;
-  const dansBudget = w => w.price >= budget.min && (ouvert ? w.price <= 110 : w.price <= budget.max);
+  // Rosé tendre : les demi-secs sont tous d'entrée de gamme, on les accepte sous la tranche demandée
+  const plancher = demande.gout === 'rose_tendre' ? 0 : budget.min;
+  const dansBudget = w => w.price >= plancher && (ouvert ? w.price <= 110 : w.price <= budget.max);
   const couleurOk = w => !couleur || w.type === couleur;
 
   // La couleur choisie à l'écran compte comme une couleur imposée par le client (voir noterVin)
@@ -710,6 +849,23 @@ function candidatsGuides(wines, demande) {
       retenus = retenus.concat(extra);
     }
   }
+  // Dernier repli (ex. apéritif « blanc doux » à moins de 8 €) : les vins de la couleur
+  // demandée compatibles avec le goût, à n'importe quel prix, les plus proches du budget.
+  if (retenus.length < 3) {
+    const deja = new Set(retenus.map(n => n.wine.id));
+    const cible = ouvert ? budget.min : budget.max;
+    const extra = wines
+      .filter(w => !deja.has(w.id) && (couleurOk(w) || compromis))
+      .map(w => Object.assign({ wine: w }, noter(w)))
+      .filter(n => n.score > -99)
+      .sort((a, b) => Math.abs(a.wine.price - cible) - Math.abs(b.wine.price - cible) || (b.score - a.score))
+      .slice(0, 3 - retenus.length);
+    if (extra.length) {
+      horsBudget = true;
+      notes = notes.concat(extra.filter(n => !notes.find(x => x.wine.id === n.wine.id)));
+      retenus = retenus.concat(extra);
+    }
+  }
   // Recette sans couleur imposée (sauce, déglaçage) : on garde des rouges ET des blancs
   if (occasion === 'cuisiner' && !demande.recette.couleur && !couleur) {
     const rouges = notes.filter(n => n.wine.type === 'rouge').slice(0, 7);
@@ -727,7 +883,8 @@ function candidatsGuides(wines, demande) {
       if (!retenus.find(n => n.wine.id === dec.wine.id)) retenus.push(dec);
     }
   }
-  return { candidats: retenus.map(n => n.wine), notes: new Map(notes.map(n => [n.wine.id, n])), decouverte, compromis, horsBudget };
+  const sousBudget = plancher < budget.min && retenus.some(n => n.wine.price < budget.min);
+  return { candidats: retenus.map(n => n.wine), notes: new Map(notes.map(n => [n.wine.id, n])), decouverte, compromis, horsBudget, sousBudget };
 }
 
 
@@ -908,8 +1065,14 @@ async function selectionGuidee(body, bracket, featuredSet, res, env) {
   // Compromis : combien de vins de la couleur demandée dans les 3 (2, ou 1 s'il n'y en a qu'un)
   const nbGardes = c.compromis ? Math.min(2, candidates.filter(w => w.type === c.compromis.couleur).length) : 0;
   if (c.horsBudget) {
-    contexte += ' Certains vins de la liste sont un peu hors de la tranche choisie, faute de mieux : si tu en retiens un, signale-le dans "message".';
-    if (!messageInfo) messageInfo = 'Peu de vins de cette tranche conviennent à ce plat : certains sont légèrement hors budget.';
+    contexte += ' Certains vins de la liste sont un peu hors de la tranche choisie, faute de mieux : si tu en retiens un, signale-le dans "message" en nommant le vin (jamais son ID).';
+    if (!messageInfo) messageInfo = occasion === 'repas'
+      ? 'Peu de vins de cette tranche conviennent à ce plat : certains sont légèrement hors budget.'
+      : 'Peu de vins de ce style dans cette tranche : certains sont hors de votre budget.';
+  }
+  if (c.sousBudget) {
+    contexte += ' Les rosés tendres (demi-secs) sont des vins d\'entrée de gamme : certains vins de la liste coûtent moins que la tranche choisie. Retiens en priorité les demi-secs et dis-le simplement dans "message" en nommant les vins (jamais leur ID).';
+    if (!messageInfo) messageInfo = 'Les rosés tendres sont des vins accessibles : certains coûtent moins que votre budget.';
   }
   if (c.decouverte) console.log('✨ Découverte possible:', c.decouverte.name, '(' + c.decouverte.type + ')');
 
@@ -1018,10 +1181,20 @@ async function selectionGuidee(body, bracket, featuredSet, res, env) {
       return res.json({ ids: fallbackIds, roles: fallbackRoles, reasons: fallbackReasons, message: messageInfo });
     }
     console.log('✅ Parcours guidé →', parsed.ids.map(id => id + ':' + parsed.roles[id]).join(', '));
-    return res.json({
-      ids: parsed.ids, roles: parsed.roles, reasons: parsed.reasons || {},
-      message: (typeof parsed.message === 'string' && parsed.message.trim()) ? parsed.message.slice(0, 220) : messageInfo,
-    });
+    // Les numéros internes (« ID:81 ») ne doivent jamais s'afficher : on les remplace par le nom du vin
+    const sansIds = t => String(t)
+      .replace(/\s*\([^()]*\bID\s*:?\s*\d+[^()]*\)/gi, '')          // « (ID:81 et ID:218) » : supprimé
+      .replace(/\bID\s*:?\s*(\d+)/gi, (m, id) => {                   // « le vin ID:245 » : le nom du vin
+        const w = WINES_CATALOG.find(x => x.id === Number(id));
+        return w ? w.name : '';
+      }).replace(/\s{2,}/g, ' ').replace(/\s+([,.])/g, '$1').trim();
+    const reasons = {};
+    Object.keys(parsed.reasons || {}).forEach(k => { reasons[k] = sansIds(parsed.reasons[k]); });
+    let message = (typeof parsed.message === 'string' && parsed.message.trim()) ? sansIds(parsed.message).slice(0, 220) : messageInfo;
+    // Budget ou douceur : message écrit par le serveur à partir des vrais prix et profils
+    // (l'IA s'y trompait : vin sec présenté comme demi-sec, prix « hors budget » qui ne l'était pas).
+    if (!c.compromis && (c.horsBudget || c.sousBudget)) message = messageFaits(parsed.ids.map(id => WINES_CATALOG.find(w => w.id === id)).filter(Boolean), demande);
+    return res.json({ ids: parsed.ids, roles: parsed.roles, reasons: reasons, message: message });
   } catch (e) {
     console.error('Erreur parcours guidé:', e.message, '→ sélection automatique');
     return res.json({ ids: fallbackIds, roles: fallbackRoles, reasons: fallbackReasons, message: messageInfo });

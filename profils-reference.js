@@ -160,7 +160,7 @@ const ROSE = {
   'tavel': [3,2,3,3,2], 'lirac': [2,2,2,3,2], 'bandol': [2,3,2,2,1], 'cotes de provence': [1,3,1,1,1],
   'coteaux varois': [1,3,1,1,1], 'coteaux d aix': [1,3,1,1,1], 'palette': [2,3,2,2,1],
   'patrimonio': [2,3,2,2,1], 'ajaccio': [2,3,2,2,1], 'corse': [2,3,2,2,1],
-  'rose d anjou': [1,2,1,2,2,1], 'cabernet d anjou': [1,2,2,2,2,1], 'rose de loire': [1,3,1,1,1],
+  'rose d anjou': [1,2,1,2,2,1], 'cabernet d anjou': [1,2,2,2,2,1], 'cabernet de saumur': [1,2,1,2,2,1], 'rose de loire': [1,3,1,1,1],
   'sancerre': [1,3,2,1,1], 'marsannay': [1,3,2,1,1], 'bourgogne': [1,3,1,1,1],
   'costieres de nimes': [1,2,2,2,2], 'cotes du rhone': [1,2,2,2,2], 'ventoux': [1,2,1,2,2],
   'luberon': [1,2,1,1,1], 'gigondas': [2,2,2,3,2], 'bergerac': [1,2,1,2,2], 'irouleguy': [2,3,2,2,1],
