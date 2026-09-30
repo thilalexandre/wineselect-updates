@@ -38,11 +38,30 @@ const FILES = [
     minLength: 5000,
     checkSyntax: true,
   },
+  // Ce script se met à jour lui-même (la nouvelle version sert au prochain démarrage).
+  {
+    name: 'check-update.js',
+    url: 'https://raw.githubusercontent.com/thilalexandre/wineselect-updates/refs/heads/main/check-update.js',
+    minLength: 3000,
+    checkSyntax: true,
+  },
+  // Catalogue de démonstration : installé comme wines-data.js UNIQUEMENT si la
+  // borne tourne déjà sur la démo (ou n'a pas encore de catalogue). Le catalogue
+  // d'un magasin (sans la mention de démonstration) n'est jamais écrasé.
+  {
+    name: 'wines-data-demo.js',
+    cible: 'wines-data.js',
+    seulementDemo: true,
+    url: 'https://raw.githubusercontent.com/thilalexandre/wineselect-updates/refs/heads/main/wines-data-demo.js',
+    minLength: 100000,
+    checkSyntax: true,
+  },
 ];
 
-// Note : wines-data.js n'est PAS dans cette liste, volontairement — c'est le
-// catalogue propre à ce magasin, il ne doit jamais être écrasé par une mise
-// à jour générique poussée à toutes les bornes. Voir WineSelect_MasterSheet.md.
+// Note : le catalogue d'un magasin (wines-data.js) n'est jamais publié ni écrasé
+// par une mise à jour générique poussée à toutes les bornes. Seul le catalogue
+// de démonstration circule, et seulement vers les bornes en démo.
+const MARQUE_DEMO = 'Catalogue de DÉMONSTRATION';
 
 function fetchUrl(url, redirectsLeft = 5) {
   return new Promise((resolve, reject) => {
@@ -70,7 +89,13 @@ function hash(content) {
 }
 
 async function checkAndUpdate(file) {
-  const localPath = path.join(__dirname, file.name);
+  const localPath = path.join(__dirname, file.cible || file.name);
+
+  if (file.seulementDemo && fs.existsSync(localPath) &&
+      !fs.readFileSync(localPath, 'utf-8').slice(0, 300).includes(MARQUE_DEMO)) {
+    console.log('✓ ' + path.basename(localPath) + ' : catalogue du magasin, jamais remplacé automatiquement.');
+    return;
+  }
 
   let remoteContent;
   try {
@@ -82,6 +107,10 @@ async function checkAndUpdate(file) {
 
   if (!remoteContent || remoteContent.length < file.minLength) {
     console.log('⚠️  ' + file.name + ' : le fichier distant semble incomplet. On garde la version locale par sécurité.');
+    return;
+  }
+  if (file.seulementDemo && !remoteContent.slice(0, 300).includes(MARQUE_DEMO)) {
+    console.log('⚠️  ' + file.name + ' : le fichier distant n\'est pas un catalogue de démonstration. Ignoré par sécurité.');
     return;
   }
 

@@ -1219,7 +1219,11 @@ function Selection({setView, setResults}) {
         if (d.info === 'sansVin') { setInfo({plat: d.plat || o.recetteLibre}); setScreen('info'); return; }
         if (d.error || !Array.isArray(d.ids)) throw new Error(d.error || 'réponse invalide');
         let r = d.ids.map(id => WINES.find(w => w.id === id)).filter(Boolean);
-        if (r.length < 3) r = localFallback(o);
+        // Pas de repli local ici : si le moteur d'accords renvoie peu de vins, c'est qu'il a
+        // écarté les autres volontairement (ex. rouge tannique sur fruits de mer). Le repli
+        // local (filtre prix/couleur sans accord) ne sert qu'en cas de panne du serveur
+        // ou de réponse vide (jamais d'écran sans vin).
+        if (!r.length) r = localFallback(o);
         else if (d.roles && r.every(w => d.roles[w.id])) r = r.map(w => ({...w, aiReason:(d.reasons||{})[w.id], aiRole:d.roles[w.id]}));
         else r = withFallbackRoles(r).map(w => ({...w, aiReason:(d.reasons||{})[w.id]}));
         r.message = d.message || '';
@@ -1892,10 +1896,12 @@ function Admin({setView}) {
     } catch(e) {}
   };
 
+  // Recherche sans tenir compte des accents ni des majuscules (« cotes du rhone » trouve « Côtes-du-Rhône »)
+  const norm = s => String(s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
   const filtered = localWines.filter(w=>{
     if (typeFilter!=='all'&&w.type!==typeFilter) return false;
     if (budgetFilter!=='all'&&w.budget!==budgetFilter) return false;
-    if (search){const s=search.toLowerCase();return w.name.toLowerCase().includes(s)||w.region.toLowerCase().includes(s)||(w.grape||'').toLowerCase().includes(s);}
+    if (search){const s=norm(search);return norm(w.name).includes(s)||norm(w.region).includes(s)||norm(w.grape).includes(s);}
     return true;
   }).sort((a,b)=>{
     if(sortBy==='rating')    return b.rating-a.rating;

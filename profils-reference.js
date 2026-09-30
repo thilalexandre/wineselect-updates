@@ -142,6 +142,13 @@ const BLANC = {
   'saint joseph': [2,2,2,2,2,1,0], 'cassis': [2,2,2,2,2,2,0], 'bandol': [2,2,2,2,2,2,0],
   'palette': [2,2,3,2,2,2,1], 'cotes de provence': [1,2,2,1,2,1,0], 'collioure': [2,2,2,2,2,3,0],
   'cotes du roussillon': [2,2,2,2,2,1,0], 'picpoul': [1,3,1,1,1,2,0], 'limoux': [2,3,2,2,2,2,1],
+  // Vins doux naturels blancs (toujours doux, même sans « doux » dans le nom)
+  'muscat de beaumes de venise': [2,2,3,3,3,1,0,3], 'muscat de rivesaltes': [2,2,3,3,3,1,0,3],
+  'muscat de frontignan': [2,2,3,3,3,1,0,3], 'muscat de lunel': [2,2,3,3,3,1,0,3],
+  'muscat de mireval': [2,2,3,3,3,1,0,3], 'muscat de saint jean de minervois': [2,2,3,3,3,1,0,3],
+  'rivesaltes': [3,2,3,3,2,1,0,3],
+  'vin de paille': [3,2,3,3,3,1,0,3], 'cotes du jura vin de paille': [3,2,3,3,3,1,0,3],
+  'arbois vin de paille': [3,2,3,3,3,1,0,3], 'l etoile vin de paille': [3,2,3,3,3,1,0,3],
   // Jura / Savoie
   'chateau chalon': [3,3,3,2,3,2,0,0,1], 'vin jaune': [3,3,3,2,3,2,0,0,1], 'arbois': [2,3,3,2,2,2,0],
   'cotes du jura': [2,3,2,2,2,2,1], 'roussette de savoie': [2,3,2,2,2,2,0], 'apremont': [1,3,1,1,1,2,0],
@@ -213,7 +220,7 @@ const CEPAGES_ROUGES_SUR_BLANC = ['syrah', 'mourvedre', 'cabernet sauvignon', 'c
 // ── Outils ──────────────────────────────────────────────────────────────────
 function norm(s) {
   return ' ' + String(s || '').toLowerCase()
-    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     .replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim() + ' ';
 }
 function findLongest(table, text) {

@@ -22,6 +22,7 @@ const { profilerVin, libelle } = require('./profils-reference.js');
 
 const REGLAGES = {
   seuilCompatible: 65,     // note minimale pour être proposé
+  seuilAcceptable: 55,     // en dessous, un vin ne sert jamais à compléter une liste trop courte
   decouverteProba: 0.5,    // « de temps en temps » : 1 fois sur 2 quand une découverte existe
   decouverteEcartMax: 10,  // la découverte doit être à moins de 10 points du meilleur vin
   decouverteNoteMin: 75,   // ... et avoir au moins 75
@@ -130,7 +131,12 @@ function noterVin(wine, d) {
   const allege = d.gras >= 3 && p.fraicheur === 3 && (t === 'blanc' || t === 'bulles');
 
   // ─ Interdits absolus
-  if (t === 'rouge' && mer && (d.cuisson === 'cru' || d.iode >= 2)) return veto('rouge sur produit de la mer cru ou iodé');
+  // Rouge sur le cru ou l'iodé : interdit, sauf si le client a explicitement demandé du rouge.
+  // Dans ce cas seuls les rouges très légers et peu tanniques (gamay, poulsard, pinot léger)
+  // restent possibles, notés comme un compromis (voir règles du rouge plus bas).
+  const merCruIode = mer && (d.cuisson === 'cru' || d.iode >= 2);
+  const rougeTresLeger = t === 'rouge' && p.tanins <= 1 && (p.corps === 1 || p.fraicheur === 3);
+  if (t === 'rouge' && merCruIode && !(d.couleur_demandee === 'rouge' && rougeTresLeger)) return veto('rouge sur produit de la mer cru ou iodé');
   if (t === 'rouge' && mer && p.tanins >= 2) return veto('tanins et poisson donnent un goût métallique');
   if (dessert && d.sucre >= 2 && p.sucrosite === 0) return veto('vin sec sur un dessert sucré');
   if (d.sucrosite_demandee != null && Math.abs(p.sucrosite - d.sucrosite_demandee) >= 2) return veto('pas le style demandé par le client');
@@ -138,7 +144,10 @@ function noterVin(wine, d) {
   // ─ Socle commun : corps, intensité, sucre
   const dc = Math.max(0, Math.abs(p.corps - d.corps) - (allege ? 1 : 0));
   add([22, 8, -15][dc], ['corps à la hauteur du plat', 'corps proche du plat', 'corps décalé avec le plat'][dc]);
-  const di = Math.abs(p.intensite - d.intensite);
+  // Un vin vif et sans bois porte sa concentration sans écraser un plat délicat
+  // (Chablis 1er Cru sur une sole) : l'écart d'intensité compte un cran de moins.
+  const vifSansBois = p.intensite > d.intensite && p.fraicheur === 3 && !p.boise;
+  const di = Math.max(0, Math.abs(p.intensite - d.intensite) - (vifSansBois ? 1 : 0));
   add([8, 3, -6][di], di === 0 ? 'même intensité que le plat' : di === 2 ? 'intensité décalée' : null);
 
   if (d.sucrosite_demandee != null) {
@@ -171,7 +180,18 @@ function noterVin(wine, d) {
 
   // ─ Règles propres à chaque couleur
   if (t === 'rouge') {
-    if (mer) add(p.fraicheur === 3 ? -5 : -20, 'rouge sur poisson : seulement très léger et frais');
+    if (merCruIode) {
+      // Seulement quand le client a imposé le rouge (sinon interdit plus haut) : compromis,
+      // noté sous le seuil acceptable pour que le moteur propose aussi une alternative.
+      add(-25, null);
+      plus.push('rouge très léger à servir bien frais (vers 12 °C), le compromis le plus sûr sur l\'iode');
+    } else if (mer) {
+      // Ici les tanins sont forcément souples (sinon interdit plus haut) : un rouge
+      // léger servi frais passe sur des produits de la mer cuits.
+      const leger = p.fraicheur === 3 || p.corps === 1;
+      add(leger ? -5 : -20, leger ? null : 'rouge encore trop présent pour la mer');
+      if (leger) plus.push('rouge léger à tanins souples, à servir frais (12-14 °C)');
+    }
     if (d.epice >= 2 && p.tanins >= 2) add(-20, 'tanins exacerbés par le piquant');
     if (d.epice >= 2 && p.boise === 2) add(-8, 'boisé qui chauffe avec les épices');
     if (viandeRouge && d.corps >= 2 && p.tanins >= 2) {
@@ -197,6 +217,7 @@ function noterVin(wine, d) {
     if (mer) add(10, 'blanc sur produit de la mer');
     if (d.iode >= 2 && p.mineralite === 3) add(12, 'minéralité qui prolonge l\'iode');
     if (mer && p.mineralite >= 2 && p.boise === 0) add(4, null);
+    if (mer && (d.cuisson === 'cru' || d.iode >= 2) && p.boise === 2) add(-15, 'boisé marqué qui écrase l\'iode');
     if (creme && p.texture >= 2) add(12, 'texture ronde pour la sauce');
     if (creme && p.boise >= 1) add(4, 'élevage qui accompagne la crème');
     if (d.gras >= 2 && p.texture === 1 && p.fraicheur === 3) add(3, null);
@@ -301,25 +322,59 @@ function decrirePlat(d) {
 // et classés selon leur note d'accord avec le plat, plus selon une étiquette.
 const PREMIUM = /peu importe le prix|grande occasion|grand cru|prestige|meilleur vin|sans limite|exceptionnel/i;
 
+// Vivier de candidats : jamais de vin mal accordé pour « compléter » une liste trop courte.
+//   - au moins 6 vins compatibles (≥ seuilCompatible) → on garde ceux-là ;
+//   - sinon les vins acceptables (≥ seuilAcceptable), s'il y en a au moins 3 ;
+//   - sinon, faute de mieux, les 3 meilleurs (Gabriel dira que l'accord est imparfait).
+// couleurGardee : couleur imposée par le client en situation de compromis ; ses vins
+// (qui ont déjà passé les interdits) sont toujours gardés, en tête de liste.
+function vivier(lst, couleurGardee) {
+  const gardes = couleurGardee ? lst.filter(n => n.wine.type === couleurGardee).slice(0, 5) : [];
+  const ok = lst.filter(n => n.score >= REGLAGES.seuilCompatible);
+  let base;
+  if (ok.length >= 6) base = ok;
+  else {
+    const acc = lst.filter(n => n.score >= REGLAGES.seuilAcceptable);
+    // (hors vins gardés, sinon ils occupent ces 3 places et les alternatives disparaissent)
+    base = acc.length >= 3 ? acc.slice(0, Math.max(ok.length, 12)) : lst.filter(n => !gardes.includes(n)).slice(0, 3);
+  }
+  return gardes.concat(base.filter(n => !gardes.includes(n)));
+}
+const ARTICLE = { rouge: 'du rouge', blanc: 'du blanc', 'rosé': 'du rosé', bulles: 'des bulles' };
+const PLURIEL = { rouge: 'rouges', blanc: 'blancs', 'rosé': 'rosés', bulles: 'vins effervescents' };
+
 function construireCandidats(wines, d, budget, featuredSet, texteClient, aleatoire) {
   featuredSet = featuredSet || new Set();
   const bonusSel = w => featuredSet.has(w.id) ? 3 : 0;
-  const notes = wines
-    .filter(w => !d.couleur_demandee || w.type === d.couleur_demandee)
+  const noter = lst => lst
     .map(w => Object.assign({ wine: w }, noterVin(w, d)))
-    .filter(n => n.score > -99)
-    .sort((a, b) => (b.score + bonusSel(b.wine)) - (a.score + bonusSel(a.wine)) || b.wine.rating - a.wine.rating);
-  const parId = new Map(notes.map(n => [n.wine.id, n]));
+    .filter(n => n.score > -99);
+  let notes = noter(wines.filter(w => !d.couleur_demandee || w.type === d.couleur_demandee));
 
-  // Vivier : les vins compatibles ; si le rayon est pauvre, les mieux notés quand même
-  const compatibles = lst => {
-    const ok = lst.filter(n => n.score >= REGLAGES.seuilCompatible);
-    return ok.length >= 6 ? ok : lst.slice(0, Math.max(ok.length, 12));
-  };
+  // Couleur imposée par le client mais (presque) rien d'acceptable dans cette couleur pour
+  // ce plat (ex. rouge sur fruits de mer) : on garde les rares vins de sa couleur qui passent
+  // les interdits (rouges légers à servir frais) et on ajoute les meilleurs accords des
+  // autres couleurs, présentés comme alternatives. Avant, la liste revenait vide et Gabriel
+  // piochait dans tout le catalogue (Pomerol, Châteauneuf...).
+  let compromis = null;
+  if (d.couleur_demandee && notes.filter(n => n.score >= REGLAGES.seuilAcceptable).length < 3) {
+    const autres = noter(wines.filter(w => w.type !== d.couleur_demandee))
+      .filter(n => n.score >= REGLAGES.seuilCompatible);
+    if (autres.length) {
+      compromis = { couleur: d.couleur_demandee };
+      notes = notes.concat(autres);
+    }
+  }
+  notes.sort((a, b) => (b.score + bonusSel(b.wine)) - (a.score + bonusSel(a.wine)) || b.wine.rating - a.wine.rating);
+  const parId = new Map(notes.map(n => [n.wine.id, n]));
+  const bonusGarde = n => (compromis && n.wine.type === compromis.couleur) ? 30 : 0;
+
+  // Vivier : voir vivier() — jamais de vin mal accordé pour compléter la liste
+  const compatibles = lst => vivier(lst, compromis ? compromis.couleur : null);
 
   let tierWines = null, available, fenetre;
 
-  if (budget) {
+  if (budget && !compromis) {
     const ref = budget.ref || budget.max;
     const ratios = budget.strict ? [0.80, 0.90, 1.00] : [0.80, 1.00, 1.20];
     const tiers = ratios.map(r => ref * r);
@@ -337,15 +392,34 @@ function construireCandidats(wines, d, budget, featuredSet, texteClient, aleatoi
     ];
     tierWines = tiers.map((target, i) => {
       const cands = bandes[i].length ? bandes[i] : pool;
-      const val = n => n.score + bonusSel(n.wine) - Math.abs(n.wine.price - target) / target * 20;
+      const val = n => n.score + bonusSel(n.wine) + bonusGarde(n) - Math.abs(n.wine.price - target) / target * 20;
       return [...cands].sort((a, b) => val(b) - val(a)).slice(0, 5).map(n => n.wine);
     });
     available = [...new Set(tierWines.flat())];
     tierWines._tiers = tiers;
+  } else if (budget) {
+    // Compromis couleur : peu de vins conviennent, à des prix épars. Pas de paliers de prix
+    // imposés (Gabriel « ajustait » les prix pour les y faire entrer) : liste libre dans le budget.
+    const ceiling = budget.max * (budget.strict ? 1.0 : 1.05);
+    const dansBande = (n, lo) => n.wine.price >= lo && n.wine.price <= ceiling;
+    fenetre = notes.filter(n => dansBande(n, budget.min * 0.95));
+    let pool = compatibles(fenetre);
+    if (pool.length < 3) { fenetre = notes.filter(n => dansBande(n, (budget.ref || budget.max) * 0.55)); pool = compatibles(fenetre); }
+    available = pool.slice(0, 15).map(n => n.wine);
   } else {
     const plafond = PREMIUM.test(texteClient || '') ? Infinity : REGLAGES.prixMaxSansBudget;
     fenetre = notes.filter(n => n.wine.price <= plafond);
     available = compatibles(fenetre).slice(0, 15).map(n => n.wine);
+  }
+
+  // Rien d'utilisable dans le budget : jamais de liste vide (sinon Gabriel pioche dans
+  // tout le catalogue, sans filtre d'accord) → les mieux accordés, prix annoncés.
+  let horsBudget = false;
+  if (!available.length) {
+    horsBudget = true;
+    tierWines = null;
+    fenetre = notes;
+    available = compatibles(notes).slice(0, 15).map(n => n.wine);
   }
 
   // Découverte : un vin d'une autre couleur, seulement si l'accord est excellent
@@ -364,7 +438,7 @@ function construireCandidats(wines, d, budget, featuredSet, texteClient, aleatoi
     decouverte = dec.wine; // déjà présent dans la liste : on le signale simplement
   }
 
-  return { tierWines, available, decouverte, notes: parId };
+  return { tierWines, available, decouverte, notes: parId, compromis, horsBudget };
 }
 
 // Ligne d'un candidat dans le prompt de Gabriel
@@ -580,24 +654,62 @@ function candidatsGuides(wines, demande) {
   const dansBudget = w => w.price >= budget.min && (ouvert ? w.price <= 110 : w.price <= budget.max);
   const couleurOk = w => !couleur || w.type === couleur;
 
-  const noter = w => occasion === 'repas' ? noterVin(w, demande.plat)
+  // La couleur choisie à l'écran compte comme une couleur imposée par le client (voir noterVin)
+  const platNote = occasion === 'repas' && demande.plat
+    ? Object.assign({}, demande.plat, { couleur_demandee: couleur || demande.plat.couleur_demandee || null }) : null;
+  const noter = w => occasion === 'repas' ? noterVin(w, platNote)
     : occasion === 'cuisiner' ? noterRecette(w, demande.recette)
     : noterStyle(w, demande.gout || 'inconnu', occasion);
 
-  const notes = wines.filter(w => dansBudget(w) && couleurOk(w))
+  let notes = wines.filter(w => dansBudget(w) && couleurOk(w))
     .map(w => Object.assign({ wine: w }, noter(w)))
     .filter(n => n.score > -99);
+
+  // Couleur imposée mais (presque) rien d'acceptable dans cette couleur pour ce plat
+  // (ex. rouge sur fruits de mer) : on garde les rares vins de la couleur qui passent
+  // (rouges légers à servir frais) et on ajoute les meilleurs accords des autres couleurs.
+  let compromis = null;
+  if (occasion === 'repas' && couleur && notes.filter(n => n.score >= REGLAGES.seuilAcceptable).length < 3) {
+    const autres = wines.filter(w => dansBudget(w) && w.type !== couleur)
+      .map(w => Object.assign({ wine: w }, noter(w)))
+      .filter(n => n.score >= REGLAGES.seuilCompatible)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 6);
+    if (autres.length) {
+      compromis = { couleur };
+      notes = notes.concat(autres);
+    }
+  }
 
   // Positionnement dans la tranche : haut de tranche pour boire et offrir,
   // bas de tranche pour cuisiner (pas besoin d'un grand vin dans la casserole).
   const ref = ouvert ? null : budget.min + (budget.max - budget.min) * (occasion === 'cuisiner' ? 0.25 : 0.75);
   const span = ouvert ? 1 : Math.max(1, budget.max - budget.min);
-  const val = n => n.score + (featuredSet.has(n.wine.id) ? 8 : 0) +
+  const val = n => n.score + (featuredSet.has(n.wine.id) ? 8 : 0) + ((compromis && n.wine.type === compromis.couleur) ? 30 : 0) +
     (ref === null ? 0 : Math.max(0, 1 - Math.abs(n.wine.price - ref) / span) * 8);
   notes.sort((a, b) => val(b) - val(a) || (b.wine.rating || 0) - (a.wine.rating || 0));
 
-  const ok = notes.filter(n => n.score >= REGLAGES.seuilCompatible);
-  let retenus = (ok.length >= 6 ? ok : notes.slice(0, Math.max(ok.length, 10))).slice(0, 14);
+  let retenus = vivier(notes, compromis ? compromis.couleur : null).slice(0, 14);
+
+  // Filet de sécurité : jamais moins de 3 vins. Si la tranche est trop pauvre pour ce plat,
+  // on prend les mieux accordés un peu hors tranche (le client en est averti).
+  let horsBudget = false;
+  if (retenus.length < 3) {
+    const deja = new Set(notes.map(n => n.wine.id));
+    const plafond = ouvert ? Infinity : budget.max * 1.6;
+    const cible = ouvert ? budget.min : budget.max;
+    const extra = wines
+      .filter(w => !deja.has(w.id) && w.price <= plafond && (couleurOk(w) || compromis))
+      .map(w => Object.assign({ wine: w }, noter(w)))
+      .filter(n => n.score >= REGLAGES.seuilAcceptable)
+      .sort((a, b) => (b.score - a.score) || (Math.abs(a.wine.price - cible) - Math.abs(b.wine.price - cible)))
+      .slice(0, 3 - retenus.length);
+    if (extra.length) {
+      horsBudget = true;
+      notes = notes.concat(extra);
+      retenus = retenus.concat(extra);
+    }
+  }
   // Recette sans couleur imposée (sauce, déglaçage) : on garde des rouges ET des blancs
   if (occasion === 'cuisiner' && !demande.recette.couleur && !couleur) {
     const rouges = notes.filter(n => n.wine.type === 'rouge').slice(0, 7);
@@ -615,7 +727,7 @@ function candidatsGuides(wines, demande) {
       if (!retenus.find(n => n.wine.id === dec.wine.id)) retenus.push(dec);
     }
   }
-  return { candidats: retenus.map(n => n.wine), notes: new Map(notes.map(n => [n.wine.id, n])), decouverte };
+  return { candidats: retenus.map(n => n.wine), notes: new Map(notes.map(n => [n.wine.id, n])), decouverte, compromis, horsBudget };
 }
 
 
@@ -665,7 +777,7 @@ async function preparerSommelier(env) {
   const fmt = w => ligneCandidat(w, c.notes.get(w.id), featuredSet, c.decouverte);
 
   let inject = '\n\n>>> CONTRAINTES OBLIGATOIRES <<<';
-  if (budget) {
+  if (budget && tierWines) {
     const tiers = tierWines._tiers;
     inject += '\nBUDGET MAXIMUM DE RÉFÉRENCE : ' + Math.round(budget.ref || budget.max) + '€ (annoncé par le client).';
     inject += '\nSTRUCTURE DE PRIX OBLIGATOIRE pour tes 3 propositions :';
@@ -675,11 +787,21 @@ async function preparerSommelier(env) {
     inject += '\nLes prix doivent monter du 🥇 au ✨. Aucun vin en dessous de ' + Math.round(budget.min) + '€.';
     if (budget.strict) inject += '\nPLAFOND STRICT : le client a fixé un maximum absolu. Ne dépasse JAMAIS ' + Math.round(budget.max) + '€, même de 1€, sous aucun prétexte.';
   }
+  if (budget && c.horsBudget) {
+    inject += '\nAUCUN vin adapté à ce plat dans le budget annoncé (' + Math.round(budget.ref || budget.max) + '€) : dis-le honnêtement en une phrase, puis propose les plus proches ci-dessous en annonçant clairement leur prix.';
+  }
   inject += '\nPLAT DU CLIENT : ' + decrirePlat(plat) + (plat.resume ? '. ' + plat.resume : '');
   inject += '\nLes vins ci-dessous ont été présélectionnés pour leur accord avec CE plat : chaque ligne donne le profil du vin ' +
     'et les raisons de l\'accord. Appuie tes explications sur ces raisons et sur la recette réelle du client (sauce, cuisson, ' +
     'garniture), en mots simples. Ne parle jamais de « note » ni de score.';
-  if (plat.couleur_demandee) inject += '\nLe client veut du ' + plat.couleur_demandee + ' : ne propose que du ' + plat.couleur_demandee + '.';
+  if (c.compromis) {
+    const col = c.compromis.couleur;
+    const nb = available.filter(w => w.type === col).length;
+    console.log('⚖️  Compromis couleur :', col, '→', nb, 'vin(s) de cette couleur retenu(s)');
+    inject += nb
+      ? '\nLe client veut ' + ARTICLE[col] + ', qui s\'accorde mal avec ce plat. On respecte son choix : les ' + PLURIEL[col] + ' de la liste sont les seuls acceptables (légers, tanins souples, à servir frais vers 12 °C). Propose-en EXACTEMENT ' + Math.min(2, nb) + ' en expliquant honnêtement ce compromis en une phrase, puis UN vin d\'une autre couleur de la liste, présenté comme l\'accord le plus sûr. Présente les 3 vins par prix croissant : l\'alternative prend sa place selon son prix, pas forcément en dernier.'
+      : '\nLe client veut ' + ARTICLE[col] + ', mais aucun vin de cette couleur ne convient à ce plat : dis-le honnêtement en une phrase simple, sans le culpabiliser, puis propose les vins d\'autres couleurs de la liste.';
+  } else if (plat.couleur_demandee) inject += '\nLe client veut du ' + plat.couleur_demandee + ' : ne propose que du ' + plat.couleur_demandee + '.';
   if (plat.sucrosite_demandee != null) inject += '\nLe client demande un vin ' + ['sec', 'demi-sec', 'moelleux', 'liquoreux'][plat.sucrosite_demandee] + ' : respecte ce style.';
   const meilleure = Math.max(...available.map(w => (c.notes.get(w.id) || { score: 0 }).score));
   if (meilleure < REGLAGES.seuilCompatible) {
@@ -688,6 +810,7 @@ async function preparerSommelier(env) {
   }
   inject += '\nVINS DISPONIBLES — RÈGLE ABSOLUE : tes 3 propositions doivent EXCLUSIVEMENT provenir de ces listes.';
   inject += '\nIgnore tout autre vin du catalogue général, même s\'il te semble pertinent. Proposer un vin hors liste est une erreur grave.';
+  inject += '\nAnnonce toujours le prix EXACT indiqué dans la liste pour chaque vin : ne l\'arrondis pas et ne l\'ajuste jamais, même pour respecter une progression de prix.';
   if (tierWines) {
     inject += '\nCandidats pour le vin 🥇 :'; tierWines[0].forEach(w => inject += fmt(w));
     inject += '\nCandidats pour le vin ⭐ :';  tierWines[1].forEach(w => inject += fmt(w));
@@ -769,14 +892,43 @@ async function selectionGuidee(body, bracket, featuredSet, res, env) {
 
   const c = ACCORDS.candidatsGuides(WINES_CATALOG, demande);
   const candidates = c.candidats;
+  let messageInfo = '';
+  if (c.compromis) {
+    const col = c.compromis.couleur;
+    const nb = candidates.filter(w => w.type === col).length;
+    console.log('⚖️  Compromis couleur :', col, '→', nb, 'vin(s) de cette couleur retenu(s)');
+    contexte += nb
+      ? ' ATTENTION : le client a demandé ' + ARTICLE[col] + ', qui s\'accorde mal avec ce plat. On respecte son choix : les ' + PLURIEL[col] + ' de la liste sont les seuls acceptables (légers, tanins souples, à servir frais vers 12 °C). Retiens-en EXACTEMENT ' + Math.min(2, nb) + ', et complète avec UN vin d\'une autre couleur, l\'accord le plus sûr, avec le rôle "decouverte".'
+      : ' ATTENTION : le client a demandé ' + ARTICLE[col] + ', mais aucun vin de cette couleur ne convient à ce plat : choisis parmi les autres couleurs de la liste.';
+    contexte += ' Dans "message", explique ce choix au client en une phrase simple et bienveillante.';
+    messageInfo = nb
+      ? 'Avec ce plat, ' + ARTICLE[col] + ' doit rester très léger et servi bien frais : voici les plus adaptés, et en découverte, l\'accord le plus sûr.'
+      : 'Avec ce plat, ' + ARTICLE[col] + ' se marie mal : voici les accords les plus justes dans d\'autres couleurs.';
+  }
+  // Compromis : combien de vins de la couleur demandée dans les 3 (2, ou 1 s'il n'y en a qu'un)
+  const nbGardes = c.compromis ? Math.min(2, candidates.filter(w => w.type === c.compromis.couleur).length) : 0;
+  if (c.horsBudget) {
+    contexte += ' Certains vins de la liste sont un peu hors de la tranche choisie, faute de mieux : si tu en retiens un, signale-le dans "message".';
+    if (!messageInfo) messageInfo = 'Peu de vins de cette tranche conviennent à ce plat : certains sont légèrement hors budget.';
+  }
   if (c.decouverte) console.log('✨ Découverte possible:', c.decouverte.name, '(' + c.decouverte.type + ')');
 
   // Repli sans IA : les 3 mieux notés, présentés à prix croissants
-  const fallbackWines = candidates.slice(0, 3).sort((a, b) => a.price - b.price);
+  // (compromis : les vins de la couleur demandée, puis le meilleur accord d'une autre couleur en découverte)
+  let fallbackWines = candidates.slice(0, 3);
+  let fallbackAutre = null;
+  if (nbGardes) {
+    const autres = candidates.filter(w => w.type !== c.compromis.couleur)
+      .sort((a, b) => c.notes.get(b.id).score - c.notes.get(a.id).score);
+    fallbackAutre = autres[0] || null;
+    fallbackWines = candidates.filter(w => w.type === c.compromis.couleur).slice(0, nbGardes).concat(autres.slice(0, 3 - nbGardes));
+  }
+  fallbackWines.sort((a, b) => a.price - b.price);
   const fallbackIds = fallbackWines.map(w => w.id);
   const fallbackRoles = {};
   if (fallbackWines.length === 3) {
     const byScore = [...fallbackWines].sort((a, b) => c.notes.get(b.id).score - c.notes.get(a.id).score);
+    if (fallbackAutre) byScore.push(byScore.splice(byScore.indexOf(fallbackAutre), 1)[0]);
     fallbackRoles[byScore[0].id] = 'coup_de_coeur';
     fallbackRoles[byScore[1].id] = 'valeur_sure';
     fallbackRoles[byScore[2].id] = 'decouverte';
@@ -784,9 +936,12 @@ async function selectionGuidee(body, bracket, featuredSet, res, env) {
   const fallbackReasons = {};
   fallbackWines.forEach(w => {
     const n = c.notes.get(w.id);
-    if (n && n.plus[0]) fallbackReasons[w.id] = n.plus[0].charAt(0).toUpperCase() + n.plus[0].slice(1);
+    // La raison la plus parlante : on évite les raisons génériques (corps, intensité) si mieux existe
+    const generiques = ['corps à la hauteur du plat', 'corps proche du plat', 'même intensité que le plat'];
+    const r = n && (n.plus.find(x => !generiques.includes(x)) || n.plus[0]);
+    if (r) fallbackReasons[w.id] = r.charAt(0).toUpperCase() + r.slice(1);
   });
-  if (candidates.length < 3) return res.json({ ids: fallbackIds, roles: fallbackRoles, reasons: fallbackReasons });
+  if (candidates.length < 3) return res.json({ ids: fallbackIds, roles: fallbackRoles, reasons: fallbackReasons, message: messageInfo });
 
   const system = 'Tu es Gabriel, sommelier d\'une borne de supermarché. Ton sobre, pédagogique et factuel : ' +
     'tu n\'incites jamais à consommer davantage et ne présentes jamais l\'alcool comme festif.\n' +
@@ -830,7 +985,8 @@ async function selectionGuidee(body, bracket, featuredSet, res, env) {
     if (data.error || !data.choices || !data.choices.length) throw new Error((data.error && data.error.message) || data.message || 'réponse API inattendue');
     const text = data.choices[0].message.content.trim();
     const m = text.match(/\{[\s\S]*\}/);
-    return JSON.parse(m ? m[0] : text);
+    // Mistral laisse parfois une virgule avant } ou ] : on la retire plutôt que de tout rejeter
+    return JSON.parse((m ? m[0] : text).replace(/,\s*([}\]])/g, '$1'));
   };
 
   const candidateIds = new Set(candidates.map(w => w.id));
@@ -840,7 +996,13 @@ async function selectionGuidee(body, bracket, featuredSet, res, env) {
     if (!p.ids.every(id => candidateIds.has(id))) return false;
     if (!p.roles || typeof p.roles !== 'object') return false;
     const r = p.ids.map(id => p.roles[id]);
-    return r.every(x => VALID_ROLES.has(x)) && new Set(r).size === 3;
+    if (!(r.every(x => VALID_ROLES.has(x)) && new Set(r).size === 3)) return false;
+    // Compromis couleur : la demande du client est respectée (2 vins de sa couleur, ou 1 s'il n'y en a qu'un)
+    if (nbGardes) {
+      const byId = new Map(candidates.map(w => [w.id, w]));
+      if (p.ids.filter(id => byId.get(id).type === c.compromis.couleur).length !== nbGardes) return false;
+    }
+    return true;
   };
 
   try {
@@ -848,20 +1010,21 @@ async function selectionGuidee(body, bracket, featuredSet, res, env) {
     if (!validate(parsed)) {
       console.warn('⚠️  Parcours guidé : réponse non conforme → retry correctif');
       parsed = await askOnce('\n\n>>> CORRECTION : choisis STRICTEMENT 3 IDs parmi la liste ci-dessus, et assigne les 3 rôles ' +
-        '"valeur_sure"/"coup_de_coeur"/"decouverte" chacun une seule fois, dans le champ "roles". <<<');
+        '"valeur_sure"/"coup_de_coeur"/"decouverte" chacun une seule fois, dans le champ "roles".' +
+        (nbGardes ? ' Retiens EXACTEMENT ' + nbGardes + ' ' + (nbGardes > 1 ? PLURIEL[c.compromis.couleur] : c.compromis.couleur) + ' de la liste, comme demandé par le client.' : '') + ' <<<');
     }
     if (!validate(parsed)) {
       console.warn('⚠️  Parcours guidé toujours non conforme → sélection automatique');
-      return res.json({ ids: fallbackIds, roles: fallbackRoles, reasons: fallbackReasons });
+      return res.json({ ids: fallbackIds, roles: fallbackRoles, reasons: fallbackReasons, message: messageInfo });
     }
     console.log('✅ Parcours guidé →', parsed.ids.map(id => id + ':' + parsed.roles[id]).join(', '));
     return res.json({
       ids: parsed.ids, roles: parsed.roles, reasons: parsed.reasons || {},
-      message: typeof parsed.message === 'string' ? parsed.message.slice(0, 220) : '',
+      message: (typeof parsed.message === 'string' && parsed.message.trim()) ? parsed.message.slice(0, 220) : messageInfo,
     });
   } catch (e) {
     console.error('Erreur parcours guidé:', e.message, '→ sélection automatique');
-    return res.json({ ids: fallbackIds, roles: fallbackRoles, reasons: fallbackReasons });
+    return res.json({ ids: fallbackIds, roles: fallbackRoles, reasons: fallbackReasons, message: messageInfo });
   }
 }
 
