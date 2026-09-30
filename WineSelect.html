@@ -1164,6 +1164,7 @@ function Selection({setView, setResults}) {
   const [couleur,  setCouleur]  = useState(null);
   const [texte,    setTexte]    = useState('');     // saisie de l'écran « Dites-le »
   const [info,     setInfo]     = useState(null);   // recette sans vin
+  const [conseils, setConseils] = useState(null);   // repas : couleurs conseillées pour le plat
   const {mic, toggle, transcript} = useMic(t => setTexte(prev => (prev ? prev + ' ' : '') + t));
 
   const go = s => { setHist(h => h.concat([screen])); setScreen(s); };
@@ -1212,7 +1213,17 @@ function Selection({setView, setResults}) {
   };
   const pickBudget = b => {
     setBudget(b);
-    if (occasion === 'repas') go('couleur');
+    if (occasion === 'repas') {
+      // Plat choisi dans la liste : le moteur indique les couleurs qui s'accordent (pas pour un plat saisi librement)
+      setConseils(null);
+      if (pairing && !platLibre) {
+        fetch('http://localhost:3000/couleurs-conseillees', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({pairing: pairing, detail: detail ? detail.id : null, budget: b}),
+        }).then(r => r.json()).then(d => setConseils(d.couleurs || null)).catch(() => {});
+      }
+      go('couleur');
+    }
     else run({budget:b});
   };
   // Apéritif et cadeau : le type de vin est la première question, on enchaîne ensuite sur les goûts.
@@ -1430,6 +1441,12 @@ function Selection({setView, setResults}) {
                     onMouseLeave={e => { e.currentTarget.style.borderColor = 'transparent'; e.currentTarget.style.transform = 'translateY(0)'; }}>
                     <div style={{marginBottom:6, display:'flex', justifyContent:'center'}}><TypeIcon id={t.id} color={t.color} size={34}/></div>
                     <div style={{...serif, fontSize:18, color:C.wine, fontWeight:700}}>{t.label}</div>
+                    {occasion === 'repas' && conseils && conseils[t.id] === 'conseille' && (
+                      <div style={{display:'inline-block', marginTop:6, background:C.gold, color:'#fdf8f0', borderRadius:50, padding:'3px 10px', fontSize:10, fontWeight:600, letterSpacing:'.04em'}}>Conseillé avec ce plat</div>
+                    )}
+                    {occasion === 'repas' && conseils && conseils[t.id] === 'compromis' && (
+                      <div style={{marginTop:6, color:C.muted, fontSize:11, fontStyle:'italic'}}>Accord moins évident</div>
+                    )}
                   </div>
                 ))}
               </div>

@@ -689,6 +689,17 @@ const BUDGET_BRACKETS = {
   '25+':   { min: 25, max: Infinity },
 };
 
+// Couleurs conseillées pour un plat de la liste (écran « Avez-vous une préférence ? »).
+// Calcul local par le moteur d'accords, sans appel à l'API.
+app.post('/couleurs-conseillees', (req, res) => {
+  const bracket = BUDGET_BRACKETS[req.body.budget];
+  if (!ACCORDS || !WINES_CATALOG.length || !bracket) return res.json({ couleurs: null });
+  const plat = ACCORDS.platDepuisCategorie(req.body.pairing, req.body.detail);
+  if (!plat) return res.json({ couleurs: null });
+  try { res.json({ couleurs: ACCORDS.couleursConseillees(WINES_CATALOG, plat, bracket) }); }
+  catch (e) { console.warn('⚠️  Couleurs conseillées :', e.message); res.json({ couleurs: null }); }
+});
+
 app.post('/selection-accord', rateLimit(30), async (req, res) => {
   const { type, budget, pairing, detail, featuredIds } = req.body;
   const featuredSet = new Set(Array.isArray(featuredIds) ? featuredIds : []);

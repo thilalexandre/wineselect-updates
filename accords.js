@@ -231,6 +231,12 @@ function noterVin(wine, d) {
     if (['volaille', 'veau', 'porc'].includes(d.proteine) && ['roti', 'grille', 'poele'].includes(d.cuisson) && p.texture >= 2) add(8, 'rondeur sur la chair rôtie');
     if (d.proteine === 'dessert' && /chocolat|cafe/i.test(d.plat)) add(-12, 'blanc liquoreux moins juste sur le chocolat');
     if (d.sousbois >= 2 && p.texture >= 2) add(5, 'rondeur sur le sous-bois');
+    // Pâtes pressées cuites (comté, beaufort, gruyère) : un blanc sec qui a de la matière
+    // vaut souvent mieux qu'un rouge ; le Jura et la Savoie en sont les accords régionaux.
+    if (d.proteine === 'fromage' && d.corps === 3 && !d.affinite_moelleux && p.sucrosite === 0 && !p.oxydatif) {
+      add(p.texture >= 2 || p.corps >= 2 ? 12 : 4, 'blanc sec sur fromage à pâte pressée');
+      if (/jura|savoie/i.test(wine.region || '')) add(10, 'accord régional classique (comté, beaufort)');
+    }
   }
 
   if (t === 'rosé') {
@@ -760,6 +766,31 @@ function noterRecette(wine, r) {
   return { score: Math.round(s), plus, moins };
 }
 
+// ── Couleurs conseillées pour un plat (écran « Avez-vous une préférence ? ») ─
+// Même calcul que la sélection : pour chaque couleur, les vins retenus dans le budget.
+//   conseille : au moins 3 bons accords, au niveau des meilleurs toutes couleurs confondues
+//   possible  : accord correct, sans être le meilleur choix
+//   compromis : la couleur s'accorde mal avec le plat (la sélection passera en compromis)
+function couleursConseillees(wines, plat, budget) {
+  const res = {}, meilleurs = {};
+  for (const c of ['rouge', 'blanc', 'rosé', 'bulles']) {
+    const r = candidatsGuides(wines, { occasion: 'repas', budget, couleur: c, plat, featuredSet: new Set() });
+    if (r.compromis) {
+      // Compromis faute de références (ex. un seul moelleux sous 8 €) : si le meilleur vin de la
+      // couleur est un excellent accord (80 et plus), la couleur reste « possible ».
+      const meilleur = Math.max(...[...r.notes.values()].filter(n => n.wine.type === c).map(n => n.score), -Infinity);
+      res[c] = meilleur >= 80 ? 'possible' : 'compromis';
+      continue;
+    }
+    const scores = r.candidats.filter(w => w.type === c).map(w => r.notes.get(w.id).score).sort((a, b) => b - a);
+    meilleurs[c] = scores.length >= 3 && scores[2] >= REGLAGES.seuilCompatible ? scores[0] : null;
+    res[c] = 'possible';
+  }
+  const top = Math.max(...Object.values(meilleurs).filter(v => v !== null), -Infinity);
+  Object.keys(meilleurs).forEach(c => { if (meilleurs[c] !== null && meilleurs[c] >= top - 10) res[c] = 'conseille'; });
+  return res;
+}
+
 // ── Message factuel du parcours guidé (budget, douceur) ─────────────────────
 // Écrit à partir des vins réellement retenus, pour ne jamais affirmer une chose fausse.
 function messageFaits(vins, demande) {
@@ -1205,5 +1236,5 @@ module.exports = {
   analyserPlat, noterVin, choisirDecouverte, construireCandidats, ligneCandidat,
   decrireProfil, decrirePlat, nettoyer, REGLAGES,
   platDepuisCategorie, noterStyle, noterRecette, analyserRecette, candidatsGuides, GOUTS, RECETTES,
-  appelMistral, preparerSommelier, selectionGuidee,
+  appelMistral, preparerSommelier, selectionGuidee, couleursConseillees,
 };
