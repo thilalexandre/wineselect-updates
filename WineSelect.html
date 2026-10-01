@@ -88,12 +88,13 @@ function EmplacementVin({wine, grand}) {
 }
 
 const C = {
+  // Palette « Ivoire épuré » appliquée à toute l'application (octobre 2026).
   wine:'#5e1622', wine2:'#7d1f2e',
-  gold:'#b08d4f', gold2:'#9c7a3e', goldLight:'#d8bd84',
-  cream:'#fbf4e8', bg:'#f4ebda', bg2:'#ece0c9',
-  text:'#3a1008', muted:'#8a6a5c', light:'#9c7a3e',
-  bord:'rgba(176,141,79,.30)', bord2:'rgba(176,141,79,.55)',
-  cardBg:'#fbf4e8',
+  gold:'#8a6a2e', gold2:'#8a6a2e', goldLight:'#c9b99f',
+  cream:'#ffffff', bg:'#faf6ee', bg2:'#f3ece0',
+  text:'#2a1215', muted:'#6e5a50', light:'#8a6a2e',
+  bord:'#e6dccb', bord2:'#c9b99f',
+  cardBg:'#ffffff', soft:'#f3ece0', ink:'#2a1215', body:'#4d3a35',
 };
 
 // Le PIN admin n'est plus stocké dans ce fichier — il est vérifié côté
@@ -134,24 +135,30 @@ function AdminGate({ children, setView }) {
     }
   };
 
+  // Direction « Ivoire épuré » (valeurs écrites en dur : ce composant est
+  // déclaré avant C_IVOIRE).
   return (
-    <div style={{maxWidth:340, margin:'80px auto', padding:24, textAlign:'center'}}>
-      <div style={{fontSize:34, marginBottom:8}}>🔒</div>
-      <div style={{fontFamily:"'Cormorant Garamond',serif", fontSize:22, color:'#5e1622', fontWeight:700, marginBottom:6}}>Accès gérant</div>
-      <div style={{fontSize:12, color:'#8a6a5c', marginBottom:18}}>Entrez le code PIN pour accéder à l'administration.</div>
-      <input
-        type="password"
-        inputMode="numeric"
-        value={pin}
-        onChange={e => setPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
-        onKeyDown={e => { if (e.key === 'Enter') submit(); }}
-        style={{width:'100%', padding:'12px 14px', fontSize:20, letterSpacing:'0.3em', textAlign:'center', border:'1px solid ' + (error ? '#c0392b' : 'rgba(176,141,79,.30)'), borderRadius:10, marginBottom:14, fontFamily:'Montserrat,sans-serif', boxSizing:'border-box'}}
-        placeholder="••••"
-        autoFocus
-      />
-      {error && <div style={{color:'#c0392b', fontSize:12, marginBottom:10}}>{typeof error === 'string' ? error : 'Code incorrect'}</div>}
-      <button onClick={submit} disabled={checking} style={{width:'100%', padding:'12px', background:'#5e1622', color:'#fff', border:'none', borderRadius:10, fontSize:14, fontWeight:600, cursor:checking?'default':'pointer', opacity:checking?0.7:1, marginBottom:10}}>{checking?'Vérification...':'Valider'}</button>
-      <button onClick={() => setView('home')} style={{width:'100%', padding:'10px', background:'transparent', color:'#8a6a5c', border:'none', fontSize:12, cursor:'pointer'}}>Retour</button>
+    <div style={{minHeight:'100vh', background:'#faf6ee', display:'flex', alignItems:'center', justifyContent:'center', padding:'24px 24px 80px', fontFamily:'Montserrat,sans-serif'}}>
+      <div style={{maxWidth:400, width:'100%', background:'#ffffff', border:'1px solid #e6dccb', borderRadius:24, padding:'34px 28px', textAlign:'center'}}>
+        <div style={{width:68, height:68, margin:'0 auto 18px', borderRadius:'50%', border:'1px solid #c9b99f', display:'flex', alignItems:'center', justifyContent:'center', color:'#5e1622'}}>
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="5" y="10.5" width="14" height="10" rx="2"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/></svg>
+        </div>
+        <div style={{fontFamily:"'Cormorant Garamond',serif", fontSize:30, color:'#5e1622', fontWeight:500, marginBottom:6}}>Espace gérant</div>
+        <div style={{fontSize:14, color:'#6e5a50', marginBottom:22, lineHeight:1.6}}>Entrez le code PIN pour accéder à la gestion de la borne.</div>
+        <input
+          type="password"
+          inputMode="numeric"
+          value={pin}
+          onChange={e => setPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
+          onKeyDown={e => { if (e.key === 'Enter') submit(); }}
+          style={{width:'100%', minHeight:58, padding:'0 14px', fontSize:22, letterSpacing:'0.4em', textAlign:'center', background:'#faf6ee', color:'#2a1215', border:'1px solid ' + (error ? '#9b2c2c' : '#c9b99f'), borderRadius:999, marginBottom:14, fontFamily:'Montserrat,sans-serif', boxSizing:'border-box', outline:'none'}}
+          placeholder="••••"
+          autoFocus
+        />
+        {error && <div style={{color:'#9b2c2c', fontSize:13, marginBottom:12}}>{typeof error === 'string' ? error : 'Code incorrect'}</div>}
+        <button onClick={submit} disabled={checking} style={{width:'100%', minHeight:54, background:'#5e1622', color:'#faf6ee', border:'none', borderRadius:999, fontSize:15, fontWeight:500, cursor:checking?'default':'pointer', opacity:checking?0.7:1, marginBottom:10, fontFamily:'Montserrat,sans-serif'}}>{checking?'Vérification…':'Valider'}</button>
+        <button onClick={() => setView('home')} style={{width:'100%', minHeight:48, background:'transparent', color:'#5e1622', border:'1px solid #c9b99f', borderRadius:999, fontSize:14, cursor:'pointer', fontFamily:'Montserrat,sans-serif'}}>Retour</button>
+      </div>
     </div>
   );
 }
@@ -867,20 +874,29 @@ function localFallback(msg) {
 
 // ── SHARED UI ─────────────────────────────────────────────────────────────────
 function Header({title, subtitle, onBack, right}) {
+  // En-tête commun des écrans secondaires, direction « Ivoire épuré ».
+  const I = C_IVOIRE;
   return (
-    <div style={{background:C.bg2, borderBottom:`1px solid ${C.bord}`, padding:'13px 18px', display:'flex', alignItems:'center', gap:12, flexShrink:0}}>
-      {onBack && <button onClick={onBack} style={{background:'rgba(107,31,42,.1)', border:'none', borderRadius:50, width:36, height:36, color:C.wine, fontSize:16, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0}}>←</button>}
-      <div style={{flex:1}}>
-        <div style={{...serif, fontSize:18, color:C.wine, fontWeight:700}}>{title}</div>
-        {subtitle && <div style={{fontSize:11, color:C.muted}}>{subtitle}</div>}
+    <div style={{background:I.bg, borderBottom:'1px solid ' + I.bord, flexShrink:0}}>
+      <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', gap:12, padding:'20px 24px 16px'}}>
+        {onBack ? (
+          <button onClick={onBack} style={{display:'flex', alignItems:'center', gap:8, minHeight:46, padding:'0 18px 0 12px', background:'transparent', border:'1px solid ' + I.bord2, borderRadius:999, color:I.ink, fontSize:13, letterSpacing:'.04em', cursor:'pointer', fontFamily:'Montserrat,sans-serif', flexShrink:0}}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>
+            Retour
+          </button>
+        ) : <div style={{width:96, flexShrink:0}}/>}
+        <div style={{flex:1, minWidth:0, textAlign:'center'}}>
+          <div style={{...serif, fontSize:26, fontWeight:500, color:I.wine, lineHeight:1.1}}>{title}</div>
+          {subtitle && <div style={capsIv(10, I.muted, {letterSpacing:'.18em', marginTop:5})}>{subtitle}</div>}
+        </div>
+        <div style={{minWidth:96, display:'flex', justifyContent:'flex-end', flexShrink:0}}>{right || null}</div>
       </div>
-      {right}
     </div>
   );
 }
 
 function GoldLine() {
-  return <div style={{height:1, background:`linear-gradient(90deg,transparent,${C.gold},transparent)`, margin:'12px 0'}}/>;
+  return <div style={{height:1, background:C_IVOIRE.bord, margin:'16px 0'}}/>;
 }
 
 // ── WINE COLLECTOR CARD ───────────────────────────────────────────────────────
@@ -904,9 +920,9 @@ function WineCard({wine, owned=0, onCollect, compact=false, onClick}) {
         <div style={{
           position:'absolute', inset:0, borderRadius:16,
           backfaceVisibility:'hidden', WebkitBackfaceVisibility:'hidden',
-          background:`linear-gradient(168deg,#fdf8ef 0%,${C.cream} 48%,#f1e6cf 100%)`,
-          border:`1px solid ${rarity.accent}`,
-          boxShadow:`0 8px 26px rgba(94,22,34,.13), 0 1px 0 rgba(255,255,255,.7) inset`,
+          background:'linear-gradient(168deg,#ffffff 0%,#fdfaf4 55%,#f5eee1 100%)',
+          border:'1px solid #e6dccb',
+          boxShadow:'0 14px 34px rgba(42,18,21,.08)',
           display:'flex', flexDirection:'column', overflow:'hidden',
         }}>
           {/* Filet couleur type */}
@@ -942,7 +958,7 @@ function WineCard({wine, owned=0, onCollect, compact=false, onClick}) {
 
           {/* Pied prix + accord */}
           <div style={{marginTop:'auto', display:'flex', alignItems:'flex-end', justifyContent:'space-between', padding:compact?'6px 9px 8px':'8px 12px 10px'}}>
-            <span style={{...serif, fontSize:compact?17:21, fontWeight:700, color:C.wine, lineHeight:1}}>{wine.price}€</span>
+            <span style={{...serif, fontSize:compact?17:21, fontWeight:700, color:C.wine, lineHeight:1}}>{wine.price + ' €'}</span>
             <div style={{textAlign:'right'}}>
               {wine.accord && <div style={{fontSize:compact?8:9, color:C.gold2, fontWeight:600, letterSpacing:'.02em'}}>{wine.accord}</div>}
               {owned>0 && <div style={{fontSize:8, color:C.wine, fontWeight:700, marginTop:1}}>dans ma cave ×{owned}</div>}
@@ -956,7 +972,7 @@ function WineCard({wine, owned=0, onCollect, compact=false, onClick}) {
           position:'absolute', inset:0, borderRadius:16,
           backfaceVisibility:'hidden', WebkitBackfaceVisibility:'hidden',
           transform:'rotateY(180deg)',
-          background:`linear-gradient(165deg,#300d15 0%,#3a1019 40%,${typeInfo.color}88 135%)`,
+          background:'linear-gradient(165deg,#2a1215 0%,#4a1620 60%,#5e1622 100%)',
           border:`1px solid ${rarity.accent}`,
           boxShadow:'0 8px 26px rgba(94,22,34,.2), 0 1px 0 rgba(255,255,255,.06) inset',
           display:'flex', flexDirection:'column', overflow:'hidden',
@@ -980,7 +996,7 @@ function WineCard({wine, owned=0, onCollect, compact=false, onClick}) {
           {/* Cépage */}
           <div style={{textAlign:'center', marginBottom:compact?4:6}}>
             <div style={{fontSize:compact?6.5:7.5, fontWeight:700, color:rarity.dot, textTransform:'uppercase', letterSpacing:'.2em', marginBottom:3}}>Cépage</div>
-            <div style={{display:'inline-block', maxWidth:'90%', background:'rgba(253,248,240,.08)', border:'1px solid rgba(253,248,240,.16)', borderRadius:50, padding:compact?'2px 8px':'3px 11px', fontSize:compact?8:9, color:'#f3e8d5', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>🍇 {wine.grape}</div>
+            <div style={{display:'inline-block', maxWidth:'90%', background:'rgba(253,248,240,.08)', border:'1px solid rgba(253,248,240,.16)', borderRadius:50, padding:compact?'2px 8px':'3px 11px', fontSize:compact?8:9, color:'#f3e8d5', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{wine.grape}</div>
           </div>
 
           {/* En bouche — le goût, expliqué simplement */}
@@ -993,7 +1009,7 @@ function WineCard({wine, owned=0, onCollect, compact=false, onClick}) {
 
           {/* Accords — avec quoi le boire */}
           <div style={{textAlign:'center', padding:compact?'0 7px':'0 10px'}}>
-            <div style={{fontSize:compact?6.5:7.5, fontWeight:700, color:rarity.dot, textTransform:'uppercase', letterSpacing:'.2em', marginBottom:3}}>Parfait avec</div>
+            <div style={{fontSize:compact?6.5:7.5, fontWeight:700, color:rarity.dot, textTransform:'uppercase', letterSpacing:'.2em', marginBottom:3}}>À servir avec</div>
             <div style={{display:'flex', flexWrap:'wrap', gap:3, justifyContent:'center'}}>
               {(wine.pairings||[]).slice(0,compact?3:4).map(p=>{
                 const po=PAIRINGS.find(x=>x.id===p);
@@ -1011,12 +1027,12 @@ function WineCard({wine, owned=0, onCollect, compact=false, onClick}) {
             </div>
             {onCollect && (
               <button onClick={e=>{e.stopPropagation();onCollect(wine);}} style={{
-                background:`linear-gradient(135deg,${C.gold},${C.gold2})`,
+                background:'#faf6ee',
                 border:'none', borderRadius:50,
-                padding:compact?'5px 8px':'7px 10px',
-                fontSize:compact?9:10, fontWeight:700, color:'#2d0c13',
+                padding:compact?'6px 8px':'9px 10px',
+                fontSize:compact?9:10.5, fontWeight:600, color:'#5e1622',
                 cursor:'pointer', width:'100%',
-              }}>Ajouter à ma collection</button>
+              }}>Garder dans ma cave</button>
             )}
           </div>
         </div>
@@ -1028,30 +1044,38 @@ function WineCard({wine, owned=0, onCollect, compact=false, onClick}) {
 // ── MODAL ─────────────────────────────────────────────────────────────────────
 function WineModal({wine, onClose, onCollect}) {
   if (!wine) return null;
-  const rarity = CARTE_STYLE;
+  const I = C_IVOIRE;
+  const sans = {fontFamily:'Montserrat,sans-serif'};
+  const lignes = [['Cépage', wine.grape], ['Prix', wine.price + ' €']]
+    .concat(wine.accord ? [['Pour votre recherche', wine.accord]] : []);
   return (
-    <div style={{position:'fixed',inset:0,background:'rgba(58,16,8,.65)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:300,padding:16,backdropFilter:'blur(4px)'}} onClick={onClose}>
-      <div style={{background:C.cream,borderRadius:20,border:`1px solid ${C.bord2}`,padding:26,maxWidth:400,width:'100%',maxHeight:'88vh',overflowY:'auto',boxShadow:'0 24px 64px rgba(58,16,8,.3)'}} onClick={e=>e.stopPropagation()}>
-        <div style={{textAlign:'center',marginBottom:14}}>
-          <div style={{display:'flex',justifyContent:'center',marginBottom:4,filter:'drop-shadow(0 7px 16px rgba(94,22,34,.22))'}}>{wine.photo ? <PhotoVin wine={wine} h={170}/> : <Bottle wine={wine} h={132}/>}</div>
-          {wine.accord && <span style={{background:rarity.bg,color:'#fff',borderRadius:50,padding:'3px 14px',fontSize:10,fontWeight:600,textShadow:'0 1px 2px rgba(0,0,0,.3)'}}>{wine.accord}</span>}
-          {surtitreVin(wine) && <div style={{fontSize:11,color:C.gold2,fontWeight:600,letterSpacing:'.16em',textTransform:'uppercase',marginTop:10}}>{surtitreVin(wine)}</div>}
-          <div style={{...serif,fontSize:22,color:C.wine,fontWeight:700,margin:(surtitreVin(wine)?'4px':'10px')+' 0 4px',lineHeight:1.2}}>{nomVin(wine)}</div>
-          <div style={{fontSize:13,color:C.light}}>{wine.region} · {wine.appellation}{wine.millesime ? ' · ' + wine.millesime : ''}</div>
+    <div style={{position:'fixed', inset:0, background:'rgba(42,18,21,.45)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:300, padding:16, backdropFilter:'blur(3px)'}} onClick={onClose}>
+      <div style={{...sans, background:I.cream, borderRadius:24, border:'1px solid ' + I.bord, padding:'30px 28px 26px', maxWidth:440, width:'100%', maxHeight:'88vh', overflowY:'auto', boxShadow:'0 30px 70px rgba(42,18,21,.22)'}} onClick={e=>e.stopPropagation()}>
+        <div style={{textAlign:'center'}}>
+          <div style={{display:'flex', justifyContent:'center', marginBottom:14}}><PhotoVin wine={wine} h={wine.photo ? 180 : 140}/></div>
+          {wine.accord && <div style={capsIv(10, I.gold, {letterSpacing:'.2em', fontWeight:600, marginBottom:8})}>{wine.accord}</div>}
+          {surtitreVin(wine) && <div style={capsIv(11, I.muted, {letterSpacing:'.16em', marginBottom:4})}>{surtitreVin(wine)}</div>}
+          <div style={{...serif, fontSize:30, color:I.ink, fontWeight:500, lineHeight:1.1}}>{nomVin(wine)}</div>
+          <div style={{fontSize:14, color:I.muted, marginTop:6, lineHeight:1.5}}>{detailsVin(wine)}</div>
         </div>
         <GoldLine/>
-        {[['Cépage',wine.grape],['Prix',wine.price+'€']].concat(wine.accord?[['Pour votre recherche',wine.accord]]:[]).concat(wine.emplacement?[['En rayon',wine.emplacement]]:[]).concat([['Stock',wine.stock+' bouteilles']]).map(([k,v]) =>
-          <div key={k} style={{display:'flex',justifyContent:'space-between',fontSize:13,marginBottom:9,alignItems:'center'}}>
-            <span style={{color:C.muted}}>{k}</span>
-            <span style={{color:C.wine,fontWeight:600}}>{v}</span>
+        {lignes.map(([k,v]) =>
+          <div key={k} style={{display:'flex', justifyContent:'space-between', gap:16, fontSize:15, marginBottom:10, alignItems:'baseline'}}>
+            <span style={{color:I.muted}}>{k}</span>
+            <span style={{color:I.ink, fontWeight:500, textAlign:'right'}}>{v}</span>
           </div>
         )}
-        <GoldLine/>
-        <p style={{fontSize:11,color:C.muted,marginBottom:5}}>Notes de dégustation</p>
-        <p style={{fontStyle:'italic',color:C.text,fontSize:13,lineHeight:1.7,background:C.bg,borderRadius:10,padding:'10px 14px'}}>{wine.tastingNotes}</p>
-        <div style={{display:'flex',gap:10,marginTop:16}}>
-          {onCollect && <button onClick={onCollect} style={{flex:1,background:`linear-gradient(135deg,${C.gold},${C.gold2})`,color:'#2d0c13',border:'none',borderRadius:50,padding:11,cursor:'pointer',fontFamily:'Montserrat,sans-serif',fontSize:13,fontWeight:600}}>🏆 Collecter</button>}
-          <button onClick={onClose} style={{flex:1,background:'transparent',color:C.wine,border:`1.5px solid ${C.bord2}`,borderRadius:50,padding:11,cursor:'pointer',fontFamily:'Montserrat,sans-serif',fontSize:13}}>Fermer</button>
+        {wine.emplacement && <div style={{marginTop:6}}><EmplacementVin wine={wine} grand={true}/></div>}
+        {wine.tastingNotes && (
+          <>
+            <GoldLine/>
+            <div style={capsIv(10, I.muted, {letterSpacing:'.2em', fontWeight:600, marginBottom:8})}>En bouche</div>
+            <p style={{...serif, fontStyle:'italic', color:I.body, fontSize:19, lineHeight:1.55, margin:0}}>{wine.tastingNotes}</p>
+          </>
+        )}
+        <div style={{display:'flex', gap:10, marginTop:24}}>
+          {onCollect && <button onClick={onCollect} style={{...sans, flex:1, minHeight:52, background:I.wine, color:I.bg, border:'none', borderRadius:999, cursor:'pointer', fontSize:14, fontWeight:500}}>Garder dans ma cave</button>}
+          <button onClick={onClose} style={{...sans, flex:1, minHeight:52, background:'transparent', color:I.wine, border:'1px solid ' + I.bord2, borderRadius:999, cursor:'pointer', fontSize:14}}>Fermer</button>
         </div>
       </div>
     </div>
@@ -1710,6 +1734,8 @@ function Results({results, setView, collector}) {
 
 // ── MYSTERY ───────────────────────────────────────────────────────────────────
 function Mystery({setView, collector}) {
+  const I = C_IVOIRE;
+  const sans = {fontFamily:'Montserrat,sans-serif'};
   const [wine,  setWine]  = useState(null);
   const [added, setAdded] = useState(false);
   const reveal = () => {
@@ -1717,36 +1743,45 @@ function Mystery({setView, collector}) {
     setWine(pool[Math.floor(Math.random()*pool.length)]);
     setAdded(false);
   };
+  const enCave = wine && (added || (collector.collection[wine.id]||0) > 0);
+  const Losange = () => (
+    <div style={{display:'flex', alignItems:'center', justifyContent:'center', gap:12, margin:'18px auto'}}>
+      <span style={{width:48, height:1, background:I.bord2}}/>
+      <span style={{width:6, height:6, transform:'rotate(45deg)', background:I.gold}}/>
+      <span style={{width:48, height:1, background:I.bord2}}/>
+    </div>
+  );
   return (
-    <div style={{minHeight:'100vh', background:C.bg}}>
-      <Header title="Choix Mystère" onBack={()=>setView('home')}/>
-      <div style={{textAlign:'center', padding:'36px 20px', maxWidth:400, margin:'0 auto'}}>
+    <div style={{minHeight:'100vh', background:I.bg, color:I.ink}}>
+      <Header title="Choix mystère" onBack={()=>setView('home')}/>
+      <div style={{...sans, textAlign:'center', padding:'clamp(40px,8vh,72px) 24px 120px', maxWidth:520, margin:'0 auto'}}>
         {!wine ? (
           <>
-            <div style={{width:104,height:104,margin:'0 auto 18px',borderRadius:'50%',border:`1.5px solid ${C.bord2}`,display:'flex',alignItems:'center',justifyContent:'center',animation:'float 3s ease-in-out infinite',filter:'drop-shadow(0 8px 22px rgba(94,22,34,.18))',background:`radial-gradient(circle at 50% 36%,rgba(176,141,79,.16),transparent 70%)`}}><span style={{...serif,fontSize:52,color:C.wine,fontWeight:700}}>?</span></div>
-            <h2 style={{...serif, fontSize:'clamp(1.8rem,5vw,2.6rem)', color:C.wine, marginBottom:10}}>Choix Mystère</h2>
-            <div style={{width:40, height:1.5, background:'linear-gradient(90deg,transparent,'+C.gold+',transparent)', margin:'12px auto 14px'}}/>
-            <p style={{color:C.muted, marginBottom:28, lineHeight:1.7, fontSize:14}}>Laissez le sommelier vous surprendre avec un vin d'exception soigneusement sélectionné</p>
-            <button onClick={reveal} style={{background:'linear-gradient(135deg,'+C.wine+','+C.wine2+')',color:'#fdf8f0',border:'none',borderRadius:50,padding:'13px 30px',fontSize:15,fontWeight:600,cursor:'pointer',fontFamily:'Montserrat,sans-serif',boxShadow:'0 8px 24px rgba(107,31,42,.25)'}}>✨ Révéler le mystère</button>
+            <div style={{width:120, height:120, margin:'0 auto 26px', borderRadius:'50%', border:'1px solid ' + I.bord2, background:I.cream, display:'flex', alignItems:'center', justifyContent:'center', animation:'float 4s ease-in-out infinite'}}>
+              <span style={{...serif, fontSize:60, color:I.wine, fontWeight:500, lineHeight:1}}>?</span>
+            </div>
+            <div style={capsIv(11, I.gold, {letterSpacing:'.3em', fontWeight:600})}>Laissez-vous surprendre</div>
+            <h2 style={{...serif, fontSize:'clamp(2.4rem,7vw,3.2rem)', fontWeight:500, color:I.wine, margin:'10px 0 0', lineHeight:1.05}}>Choix mystère</h2>
+            <Losange/>
+            <p style={{color:I.body, margin:'0 auto 34px', lineHeight:1.7, fontSize:16, maxWidth:400}}>Un vin de notre rayon, tiré au sort entre 8 et 30 €, pour sortir de vos habitudes.</p>
+            <button onClick={reveal} style={{...sans, minHeight:58, padding:'0 40px', background:I.wine, color:I.bg, border:'none', borderRadius:999, fontSize:16, fontWeight:500, letterSpacing:'.03em', cursor:'pointer', boxShadow:'0 18px 40px rgba(94,22,34,.16)'}}>Révéler le vin</button>
           </>
         ) : (
           <div>
-            <div style={{display:'flex',alignItems:'center',justifyContent:'center',gap:9,marginBottom:14}}>
-              <span style={{width:30,height:1,background:`linear-gradient(90deg,transparent,${C.gold})`}}></span>
-              <span style={{width:5,height:5,transform:'rotate(45deg)',background:C.gold}}></span>
-              <span style={{width:30,height:1,background:`linear-gradient(90deg,${C.gold},transparent)`}}></span>
-            </div>
-            <h2 style={{...serif, fontSize:'clamp(1.5rem,4vw,2rem)', color:C.wine, marginBottom:18}}>Votre vin du moment</h2>
-            <div style={{display:'flex', justifyContent:'center', marginBottom:16}}>
+            <div style={capsIv(11, I.gold, {letterSpacing:'.3em', fontWeight:600})}>Le sommelier a tiré</div>
+            <h2 style={{...serif, fontSize:'clamp(2rem,6vw,2.6rem)', fontWeight:500, color:I.wine, margin:'10px 0 0'}}>Votre vin du moment</h2>
+            <Losange/>
+            <div style={{display:'flex', justifyContent:'center', marginBottom:20}}>
               <WineCard wine={wine} owned={collector.collection[wine.id]||0}/>
             </div>
-            {!added
-              ? <button onClick={()=>{collector.addWine(wine.id);setAdded(true);}} style={{background:'linear-gradient(135deg,'+C.gold+','+C.gold2+')',color:'#2d0c13',border:'none',borderRadius:50,padding:'10px 24px',fontSize:13,fontWeight:600,cursor:'pointer',fontFamily:'Montserrat,sans-serif',marginBottom:14,display:'block',margin:'0 auto 14px'}}>🏆 Ajouter à ma collection</button>
-              : <div style={{color:C.gold,fontSize:13,fontWeight:600,marginBottom:14}}>✓ Ajouté à votre collection !</div>
-            }
-            <div style={{display:'flex',gap:10,justifyContent:'center',flexWrap:'wrap',marginTop:14}}>
-              <button onClick={reveal} style={{background:C.cream,color:C.wine,border:'1.5px solid '+C.bord2,borderRadius:50,padding:'9px 18px',cursor:'pointer',fontFamily:'Montserrat,sans-serif',fontSize:13}}>🎲 Autre suggestion</button>
-              <button onClick={()=>setView('home')} style={{background:'transparent',color:C.muted,border:'none',borderRadius:50,padding:'9px 18px',cursor:'pointer',fontFamily:'Montserrat,sans-serif',fontSize:13}}>Retour</button>
+            <div style={{fontSize:13, color:I.muted, marginBottom:18}}>Touchez la carte pour la retourner</div>
+            {wine.emplacement && <div style={{display:'flex', justifyContent:'center', marginBottom:20}}><EmplacementVin wine={wine} grand={true}/></div>}
+            <div style={{display:'flex', gap:10, justifyContent:'center', flexWrap:'wrap'}}>
+              <button onClick={()=>{ if (!enCave) { collector.addWine(wine.id); setAdded(true); } }}
+                style={{...sans, minHeight:52, padding:'0 26px', background:enCave ? I.soft : I.wine, color:enCave ? I.wine : I.bg, border:'1px solid ' + (enCave ? I.bord2 : I.wine), borderRadius:999, fontSize:14, fontWeight:500, cursor:enCave ? 'default' : 'pointer'}}>
+                {added ? '✓ Ajouté à ma cave' : enCave ? '✓ Dans ma cave' : 'Garder dans ma cave'}
+              </button>
+              <button onClick={reveal} style={{...sans, minHeight:52, padding:'0 26px', background:'transparent', color:I.wine, border:'1px solid ' + I.bord2, borderRadius:999, fontSize:14, cursor:'pointer'}}>Une autre suggestion</button>
             </div>
           </div>
         )}
@@ -1812,8 +1847,7 @@ function Chat({setView, collector, customer}) {
   return (
     <div style={{display:'flex', flexDirection:'column', height:'calc(100vh - 34px)', background:I.bg, color:I.ink}}>
       <style>{'@keyframes pulseIv{0%,100%{box-shadow:0 0 0 0 rgba(94,22,34,.35)}50%{box-shadow:0 0 0 10px rgba(94,22,34,0)}}@keyframes pointIv{0%,80%,100%{opacity:.25}40%{opacity:1}}'}</style>
-      <EnteteIvoire onBack={()=>setView('home')}
-        droite={collector.totalCards>0 ? <button onClick={()=>setView('collector')} style={{...sans, ...capsIv(10, I.wine, {letterSpacing:'.16em', fontWeight:600}), minHeight:44, padding:'0 14px', background:'transparent', border:'1px solid ' + I.bord, borderRadius:999, cursor:'pointer'}}>{'Ma cave · ' + collector.totalCards}</button> : null}/>
+      <EnteteIvoire onBack={()=>setView('home')}/>
 
       <div style={{flex:1, overflowY:'auto'}}>
         <div style={{maxWidth:680, margin:'0 auto', padding:'28px 20px 20px', display:'flex', flexDirection:'column', gap:18}}>
@@ -1826,7 +1860,7 @@ function Chat({setView, collector, customer}) {
             <div key={i} style={{display:'flex', flexDirection:'column', alignItems:m.role==='user'?'flex-end':'flex-start'}}>
               {m.role==='assistant' && <div style={capsIv(10, I.muted, {letterSpacing:'.2em', fontWeight:600, margin:'0 0 7px 4px'})}>Le sommelier</div>}
               <div style={{...sans, maxWidth:'86%', background:m.role==='user'?I.wine:I.cream, color:m.role==='user'?I.bg:I.body, border:m.role==='user'?'none':'1px solid ' + I.bord, borderRadius:m.role==='user'?'20px 20px 6px 20px':'6px 20px 20px 20px', padding:'14px 18px', fontSize:16, lineHeight:1.65, whiteSpace:'pre-wrap'}}>
-                {m.text}
+                {m.role==='assistant' ? m.text.replace(/^(?:🥇|⭐|✨)\uFE0F?\s*/gmu, '') : m.text}
               </div>
 
               {m.wines && m.wines.length>0 && (
@@ -1908,35 +1942,42 @@ function Chat({setView, collector, customer}) {
 // ── CONFORMITÉ — bandeau sanitaire (loi Évin) ───────────────────────────────
 function SanteBanner() {
   return (
-    <div style={{position:'fixed', left:0, right:0, bottom:0, zIndex:500, background:'#2d0c13', borderTop:'1px solid rgba(176,141,79,.45)', padding:'4px 10px', textAlign:'center'}}>
-      <div style={{fontSize:9.5, fontWeight:700, color:'#fbf3e3', letterSpacing:'.08em'}}>L'ABUS D'ALCOOL EST DANGEREUX POUR LA SANTÉ — À CONSOMMER AVEC MODÉRATION</div>
-      <div style={{fontSize:8, color:'rgba(251,243,227,.6)', marginTop:1}}>Vente d'alcool interdite aux mineurs</div>
+    <div style={{position:'fixed', left:0, right:0, bottom:0, zIndex:500, background:'#2a1215', borderTop:'1px solid #8a6a2e', padding:'5px 10px', textAlign:'center', fontFamily:'Montserrat,sans-serif'}}>
+      <div style={{fontSize:9.5, fontWeight:600, color:'#faf6ee', letterSpacing:'.12em'}}>L'ABUS D'ALCOOL EST DANGEREUX POUR LA SANTÉ — À CONSOMMER AVEC MODÉRATION</div>
+      <div style={{fontSize:8.5, color:'rgba(250,246,238,.65)', marginTop:1, letterSpacing:'.04em'}}>Vente d'alcool interdite aux mineurs</div>
     </div>
   );
 }
 
 // ── CONFORMITÉ — vérification de majorité ──────────────────────────────────
 function AgeGate({onConfirm}) {
+  const I = C_IVOIRE;
+  const sans = {fontFamily:'Montserrat,sans-serif'};
   const [refused, setRefused] = useState(false);
   return (
-    <div style={{minHeight:'100vh', display:'flex', alignItems:'center', justifyContent:'center', padding:'24px', background:'radial-gradient(128% 92% at 50% -12%, #fcf6e8 0%, #f0e4cb 54%, #e5d4b4 100%)'}}>
-      <div style={{maxWidth:380, width:'100%', background:C.cream, border:'1px solid '+C.bord, borderRadius:18, padding:'30px 24px', textAlign:'center', boxShadow:'0 20px 44px rgba(42,10,6,.18)'}}>
-        <div style={{fontSize:40, marginBottom:10}}>🍷</div>
+    <div style={{...sans, minHeight:'100vh', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:'24px 24px 80px', background:I.bg, color:I.ink, textAlign:'center'}}>
+      <div style={capsIv(11, I.gold, {letterSpacing:'.34em', fontWeight:600, marginBottom:14})}>Cave &amp; Sélection</div>
+      <div style={{...serif, fontSize:'clamp(3rem,10vw,4.4rem)', fontWeight:500, color:I.wine, lineHeight:.95, letterSpacing:'-.02em'}}>WineSelect</div>
+      <div style={{display:'flex', alignItems:'center', justifyContent:'center', gap:12, margin:'22px auto 40px'}}>
+        <span style={{width:56, height:1, background:I.bord2}}/>
+        <span style={{width:6, height:6, transform:'rotate(45deg)', background:I.gold}}/>
+        <span style={{width:56, height:1, background:I.bord2}}/>
+      </div>
+      <div style={{maxWidth:440, width:'100%', background:I.cream, border:'1px solid ' + I.bord, borderRadius:24, padding:'34px 28px'}}>
         {refused ? (
           <div>
-            <div style={{...serif, fontSize:20, color:C.wine, marginBottom:8}}>Accès réservé aux adultes</div>
-            <p style={{fontSize:13, color:C.muted, lineHeight:1.7, marginBottom:18}}>La vente d'alcool est interdite aux mineurs.<br/>Cette borne n'est pas accessible aux moins de 18 ans.</p>
-            <button onClick={()=>setRefused(false)} style={{background:'transparent', color:C.wine, border:'1px solid '+C.bord, borderRadius:50, padding:'9px 22px', cursor:'pointer', fontFamily:'Montserrat,sans-serif', fontSize:12}}>Retour</button>
+            <div style={{...serif, fontSize:28, fontWeight:500, color:I.wine, marginBottom:10}}>Accès réservé aux adultes</div>
+            <p style={{fontSize:15, color:I.body, lineHeight:1.7, margin:'0 0 24px'}}>La vente d'alcool est interdite aux mineurs. Cette borne n'est pas accessible aux moins de 18 ans.</p>
+            <button onClick={()=>setRefused(false)} style={{...sans, minHeight:52, padding:'0 28px', background:'transparent', color:I.wine, border:'1px solid ' + I.bord2, borderRadius:999, cursor:'pointer', fontSize:14}}>Retour</button>
           </div>
         ) : (
           <div>
-            <div style={{...serif, fontSize:21, color:C.wine, marginBottom:8}}>Avez-vous 18 ans ou plus ?</div>
-            <p style={{fontSize:12, color:C.muted, lineHeight:1.7, marginBottom:20}}>Cet espace présente des boissons alcoolisées.<br/>La vente d'alcool est interdite aux mineurs.</p>
-            <div style={{display:'flex', gap:10, justifyContent:'center'}}>
-              <button onClick={onConfirm} style={{flex:1, background:C.wine, color:'#fdf8f0', border:'none', borderRadius:50, padding:'12px', cursor:'pointer', fontFamily:'Montserrat,sans-serif', fontSize:14, fontWeight:600}}>Oui, j'ai 18 ans ou plus</button>
-              <button onClick={()=>setRefused(true)} style={{flex:.6, background:'transparent', color:C.wine, border:'1px solid '+C.bord, borderRadius:50, padding:'12px', cursor:'pointer', fontFamily:'Montserrat,sans-serif', fontSize:14}}>Non</button>
+            <div style={{...serif, fontSize:30, fontWeight:500, color:I.wine, marginBottom:10, lineHeight:1.15}}>Avez-vous 18 ans ou plus ?</div>
+            <p style={{fontSize:15, color:I.body, lineHeight:1.7, margin:'0 0 26px'}}>Cet espace présente des boissons alcoolisées. La vente d'alcool est interdite aux mineurs.</p>
+            <div style={{display:'flex', gap:10}}>
+              <button onClick={onConfirm} style={{...sans, flex:1.6, minHeight:58, background:I.wine, color:I.bg, border:'none', borderRadius:999, cursor:'pointer', fontSize:15, fontWeight:500}}>Oui, j'ai 18 ans ou plus</button>
+              <button onClick={()=>setRefused(true)} style={{...sans, flex:1, minHeight:58, background:'transparent', color:I.wine, border:'1px solid ' + I.bord2, borderRadius:999, cursor:'pointer', fontSize:15}}>Non</button>
             </div>
-            <div style={{fontSize:9, color:C.light, marginTop:14}}>L'abus d'alcool est dangereux pour la santé — à consommer avec modération.</div>
           </div>
         )}
       </div>
@@ -1948,12 +1989,12 @@ function AgeGate({onConfirm}) {
 function WineRating({wineId, value=0, onRate, size=17}) {
   const [hover, setHover] = useState(0);
   return (
-    <div style={{display:'flex',gap:2,justifyContent:'center'}} onMouseLeave={()=>setHover(0)}>
+    <div style={{display:'flex',gap:Math.round(size/5),justifyContent:'center'}} onMouseLeave={()=>setHover(0)}>
       {[1,2,3,4,5].map(s=>(
-        <span key={s}
+        <span key={s} role="button" aria-label={s + ' sur 5'}
           onClick={e=>{e.stopPropagation(); onRate(wineId, s);}}
           onMouseEnter={()=>setHover(s)}
-          style={{fontSize:size, cursor:'pointer', lineHeight:1, color:(hover||value)>=s?C.gold:'rgba(107,31,42,.18)', transition:'color .15s', userSelect:'none'}}>★</span>
+          style={{fontSize:size, cursor:'pointer', lineHeight:1, padding:'2px', color:(hover||value)>=s?C_IVOIRE.wine:C_IVOIRE.bord2, transition:'color .2s', userSelect:'none'}}>★</span>
       ))}
     </div>
   );
@@ -1961,6 +2002,8 @@ function WineRating({wineId, value=0, onRate, size=17}) {
 
 // ── LOGIN CARTE CLIENT ────────────────────────────────────────────────────────
 function LoginScreen({setView, customerApi}) {
+  const I = C_IVOIRE;
+  const sans = {fontFamily:'Montserrat,sans-serif'};
   const [card,    setCard]    = useState('');
   const [welcome, setWelcome] = useState(null);
   const inputRef = useRef(null);
@@ -1975,57 +2018,55 @@ function LoginScreen({setView, customerApi}) {
   };
 
   const cust = customerApi.customer;
+  const carte = {background:I.cream, border:'1px solid ' + I.bord, borderRadius:24, padding:'32px 26px'};
+  const boutonPlein = {...sans, minHeight:52, padding:'0 26px', background:I.wine, color:I.bg, border:'none', borderRadius:999, cursor:'pointer', fontSize:14, fontWeight:500};
+  const boutonTrait = {...sans, minHeight:52, padding:'0 26px', background:'transparent', color:I.wine, border:'1px solid ' + I.bord2, borderRadius:999, cursor:'pointer', fontSize:14};
+  const Rond = ({children}) => <div style={{width:72, height:72, margin:'0 auto 18px', borderRadius:'50%', border:'1px solid ' + I.bord2, display:'flex', alignItems:'center', justifyContent:'center', color:I.wine}}>{children}</div>;
 
   return (
-    <div style={{minHeight:'100vh',background:C.bg}}>
+    <div style={{...sans, minHeight:'100vh', background:I.bg, color:I.ink}}>
       <Header title="Carte client" subtitle="Programme fidélité du magasin" onBack={()=>setView('home')}/>
-      <div style={{maxWidth:420,margin:'0 auto',padding:'26px 16px',textAlign:'center'}}>
+      <div style={{maxWidth:480, margin:'0 auto', padding:'36px 20px 120px', textAlign:'center'}}>
         {welcome ? (
-          <div style={{background:C.cream,border:'1px solid '+C.bord,borderRadius:15,padding:'30px 18px'}}>
-            <div style={{fontSize:44,marginBottom:10}}>✅</div>
-            <div style={{...serif,fontSize:20,color:C.wine,marginBottom:6}}>{welcome.isNew?'Bienvenue !':'Bon retour, '+welcome.profile.name+' !'}</div>
-            <p style={{fontSize:12,color:C.muted}}>{welcome.isNew?'Votre profil client vient d\'être créé. Vos cartes et vos notes seront désormais liées à votre carte.':'Votre collection et vos préférences sont chargées. Le sommelier tient compte de vos goûts.'}</p>
+          <div style={carte}>
+            <Rond><svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></Rond>
+            <div style={{...serif, fontSize:30, fontWeight:500, color:I.wine, marginBottom:8}}>{welcome.isNew ? 'Bienvenue' : 'Bon retour, ' + welcome.profile.name}</div>
+            <p style={{fontSize:15, color:I.body, lineHeight:1.7, margin:0}}>{welcome.isNew ? 'Votre profil client vient d\'être créé. Votre cave et vos notes seront désormais liées à votre carte.' : 'Votre cave et vos préférences sont chargées. Le sommelier tient compte de vos goûts.'}</p>
           </div>
         ) : cust ? (
-          <div style={{background:C.cream,border:'1px solid '+C.bord,borderRadius:15,padding:'26px 18px'}}>
-            <div style={{fontSize:40,marginBottom:8}}>👤</div>
-            <div style={{...serif,fontSize:19,color:C.wine,marginBottom:3}}>{cust.name}</div>
-            <div style={{fontSize:11,color:C.muted,marginBottom:16}}>Carte n° {cust.id} · client depuis le {new Date(cust.createdAt).toLocaleDateString('fr-FR')}</div>
-            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:9,marginBottom:18}}>
-              {[['Cartes en cave',Object.keys(cust.collection||{}).length,'🏆'],['Vins notés',Object.keys(cust.ratings||{}).length,'⭐']].map(([l,v,i])=>(
-                <div key={l} style={{background:C.bg,border:'1px solid '+C.bord,borderRadius:11,padding:'12px 8px'}}>
-                  <div style={{fontSize:18}}>{i}</div>
-                  <div style={{...serif,fontSize:18,fontWeight:700,color:C.wine}}>{v}</div>
-                  <div style={{fontSize:10,color:C.muted}}>{l}</div>
+          <div style={carte}>
+            <Rond><svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="8.5" r="3.5"/><path d="M5 20c1.2-3.6 4-5.5 7-5.5s5.8 1.9 7 5.5"/></svg></Rond>
+            <div style={{...serif, fontSize:30, fontWeight:500, color:I.wine, marginBottom:4}}>{cust.name}</div>
+            <div style={{fontSize:13, color:I.muted, marginBottom:24}}>{'Carte n° ' + cust.id + ' · client depuis le ' + new Date(cust.createdAt).toLocaleDateString('fr-FR')}</div>
+            <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:26}}>
+              {[['Vins dans ma cave', Object.keys(cust.collection||{}).length], ['Vins notés', Object.keys(cust.ratings||{}).length]].map(([l,v])=>(
+                <div key={l} style={{background:I.bg, border:'1px solid ' + I.bord, borderRadius:16, padding:'18px 10px'}}>
+                  <div style={{...serif, fontSize:34, fontWeight:500, color:I.wine, lineHeight:1}}>{v}</div>
+                  <div style={capsIv(10, I.muted, {letterSpacing:'.14em', marginTop:8})}>{l}</div>
                 </div>
               ))}
             </div>
-            <div style={{display:'flex',gap:9,justifyContent:'center'}}>
-              <button onClick={()=>setView('collector')} style={{background:C.wine,color:'#fdf8f0',border:'none',borderRadius:50,padding:'10px 20px',cursor:'pointer',fontFamily:'Montserrat,sans-serif',fontSize:13}}>Ma collection</button>
-              <button onClick={()=>{customerApi.logout();}} style={{background:'transparent',color:C.wine,border:'1px solid '+C.bord,borderRadius:50,padding:'10px 20px',cursor:'pointer',fontFamily:'Montserrat,sans-serif',fontSize:13}}>Déconnexion</button>
+            <div style={{display:'flex', gap:10, justifyContent:'center', flexWrap:'wrap'}}>
+              <button onClick={()=>setView('collector')} style={boutonPlein}>Ma cave</button>
+              <button onClick={()=>{customerApi.logout();}} style={boutonTrait}>Déconnexion</button>
             </div>
-            <button onClick={()=>{ if(window.confirm('Supprimer définitivement votre profil de cette borne (cartes et notes comprises) ?')){ customerApi.erase(); } }} style={{background:'none', border:'none', color:'#b91c1c', fontSize:11, cursor:'pointer', fontFamily:'Montserrat,sans-serif', marginTop:14, textDecoration:'underline'}}>Supprimer mes données de cette borne</button>
+            <button onClick={()=>{ if(window.confirm('Supprimer définitivement votre profil de cette borne (cave et notes comprises) ?')){ customerApi.erase(); } }} style={{...sans, minHeight:44, background:'none', border:'none', color:'#9b2c2c', fontSize:13, cursor:'pointer', marginTop:18, textDecoration:'underline', textUnderlineOffset:4}}>Supprimer mes données de cette borne</button>
           </div>
         ) : (
           <div>
-            <div style={{fontSize:48,marginBottom:12}}>💳</div>
-            <div style={{...serif,fontSize:21,color:C.wine,marginBottom:8}}>Scannez votre carte pass</div>
-            <p style={{fontSize:13,color:C.muted,lineHeight:1.7,marginBottom:20}}>Passez votre carte client sous la douchette de la borne,<br/>ou saisissez son numéro ci-dessous.</p>
-            <div style={{background:C.cream,border:'1px solid '+C.bord,borderRadius:15,padding:'18px 16px'}}>
-              <input
-                ref={inputRef}
-                value={card}
-                onChange={e=>setCard(e.target.value)}
-                onKeyDown={e=>e.key==='Enter'&&submit()}
-                placeholder="N° de carte client…"
-                inputMode="numeric"
-                style={{width:'100%',background:C.bg,border:'1.5px solid '+C.bord,color:C.text,borderRadius:10,padding:'13px 14px',fontSize:17,outline:'none',fontFamily:'Montserrat,sans-serif',textAlign:'center',letterSpacing:'.08em',marginBottom:12}}
-              />
-              <button onClick={submit} disabled={!card.trim()} style={{width:'100%',background:card.trim()?C.wine:'rgba(107,31,42,.25)',color:'#fdf8f0',border:'none',borderRadius:50,padding:'12px',cursor:card.trim()?'pointer':'default',fontFamily:'Montserrat,sans-serif',fontSize:14,fontWeight:600}}>Se connecter</button>
-              <div style={{fontSize:10,color:C.light,marginTop:10}}>💡 Le scan douchette remplit ce champ automatiquement et valide avec Entrée.</div>
+            <Rond><svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M3 10h18M7 15h4"/></svg></Rond>
+            <div style={{...serif, fontSize:34, fontWeight:500, color:I.wine, marginBottom:10, lineHeight:1.1}}>Scannez votre carte</div>
+            <p style={{fontSize:15, color:I.body, lineHeight:1.7, margin:'0 0 26px'}}>Passez votre carte client sous le lecteur de la borne, ou saisissez son numéro.</p>
+            <div style={carte}>
+              <input ref={inputRef} value={card} onChange={e=>setCard(e.target.value)} onKeyDown={e=>e.key==='Enter'&&submit()}
+                placeholder="N° de carte client" inputMode="numeric"
+                style={{...sans, width:'100%', minHeight:58, background:I.bg, border:'1px solid ' + I.bord2, color:I.ink, borderRadius:999, padding:'0 20px', fontSize:18, outline:'none', textAlign:'center', letterSpacing:'.1em', marginBottom:14}}/>
+              <button onClick={submit} disabled={!card.trim()} style={{...boutonPlein, width:'100%', minHeight:56, background:card.trim() ? I.wine : I.bord, cursor:card.trim() ? 'pointer' : 'default', fontSize:15}}>Se connecter</button>
+              <div style={{fontSize:12, color:I.muted, marginTop:14, lineHeight:1.6}}>Le lecteur remplit ce champ et valide tout seul.</div>
             </div>
-            <div style={{background:'rgba(176,141,79,.08)', border:'1px solid '+C.bord, borderRadius:11, padding:'11px 13px', fontSize:10, color:C.muted, lineHeight:1.65, textAlign:'left', marginTop:12}}>
-              <strong style={{color:C.wine}}>Vos données :</strong> en vous connectant, votre numéro de carte, vos cartes collectionnées et vos notes sont enregistrés sur cette borne, uniquement pour personnaliser vos recommandations. Aucune donnée nominative n'est transmise à des tiers — seules vos préférences gustatives anonymes sont utilisées par le sommelier IA. Vous pouvez supprimer votre profil à tout moment depuis cet écran, ou en faire la demande à l'accueil du magasin.
+            <div style={{background:I.soft, borderRadius:16, padding:'16px 18px', fontSize:12.5, color:I.body, lineHeight:1.7, textAlign:'left', marginTop:16}}>
+              <div style={capsIv(10, I.wine, {letterSpacing:'.18em', fontWeight:600, marginBottom:6})}>Vos données</div>
+              En vous connectant, votre numéro de carte, votre cave et vos notes sont enregistrés sur cette borne, uniquement pour personnaliser vos recommandations. Aucune donnée nominative n'est transmise à des tiers : seules vos préférences gustatives, anonymes, sont utilisées par le sommelier. Vous pouvez supprimer votre profil à tout moment depuis cet écran, ou en faire la demande à l'accueil du magasin.
             </div>
           </div>
         )}
@@ -2036,53 +2077,60 @@ function LoginScreen({setView, customerApi}) {
 
 // ── COLLECTOR PAGE ────────────────────────────────────────────────────────────
 function CollectorPage({setView, collector, customer}) {
+  const I = C_IVOIRE;
+  const sans = {fontFamily:'Montserrat,sans-serif'};
   const [filter, setFilter] = useState('all');
   const ownedWines = WINES.filter(w=>collector.collection[w.id]);
   const filtered   = filter==='all'?ownedWines:ownedWines.filter(w=>w.type===filter);
+  const nbTypes = [...new Set(ownedWines.map(w=>w.type))].length;
+  const nbNotes = ownedWines.filter(w=>collector.ratings[w.id]).length;
 
   return (
-    <div style={{minHeight:'100vh',background:C.bg}}>
-      <Header title="Ma Collection" subtitle={collector.totalCards+' vins · '+collector.points+' points'} onBack={()=>setView('home')}
-        right={collector.discount>0?<div style={{background:'linear-gradient(135deg,'+C.gold+','+C.gold2+')',borderRadius:50,padding:'5px 14px',fontSize:13,fontWeight:700,color:'#2d0c13'}}>-{collector.discount}%</div>:null}/>
-      <div style={{maxWidth:520,margin:'0 auto',padding:'18px 16px'}}>
-        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:9,marginBottom:16,maxWidth:280,marginLeft:'auto',marginRight:'auto'}}>
-          {[['Cartes collectionnées',collector.totalCards,'🃏'],['Types de vins',[...new Set(Object.keys(collector.collection).map(id=>WINES.find(w=>w.id===parseInt(id))?.type).filter(Boolean))].length,'🍷']].map(([l,v,ic])=>(
-            <div key={l} style={{background:C.cream,border:'1px solid '+C.bord,borderRadius:12,padding:'13px 8px',textAlign:'center'}}>
-              <div style={{fontSize:22,marginBottom:3}}>{ic}</div>
-              <div style={{...serif,fontSize:19,fontWeight:700,color:C.wine}}>{v}</div>
-              <div style={{fontSize:10,color:C.muted}}>{l}</div>
-            </div>
-          ))}
-        </div>
-
-        {!customer&&(
-          <div onClick={()=>setView('login')} style={{background:'rgba(176,141,79,.1)',border:'1px dashed '+C.bord2,borderRadius:12,padding:'10px 14px',fontSize:12,color:C.wine,textAlign:'center',cursor:'pointer',marginBottom:14}}>
-            💳 <strong>Scannez votre carte client</strong> pour retrouver votre collection à chaque visite et noter vos vins.
+    <div style={{...sans, minHeight:'100vh', background:I.bg, color:I.ink}}>
+      <Header title="Ma cave" subtitle={collector.totalCards + ' vin' + (collector.totalCards>1?'s':'') + (collector.points ? ' · ' + collector.points + ' points' : '')} onBack={()=>setView('home')}
+        right={collector.discount>0 ? <div style={{...capsIv(11, I.wine, {letterSpacing:'.1em', fontWeight:600}), border:'1px solid ' + I.wine, borderRadius:999, padding:'10px 14px'}}>{'−' + collector.discount + ' %'}</div> : null}/>
+      <div style={{maxWidth:620, margin:'0 auto', padding:'26px 20px 120px'}}>
+        {ownedWines.length>0 && (
+          <div style={{display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:12, marginBottom:22}}>
+            {[['Vins', collector.totalCards], ['Couleurs', nbTypes], ['Notés', nbNotes]].map(([l,v])=>(
+              <div key={l} style={{background:I.cream, border:'1px solid ' + I.bord, borderRadius:16, padding:'16px 8px', textAlign:'center'}}>
+                <div style={{...serif, fontSize:32, fontWeight:500, color:I.wine, lineHeight:1}}>{v}</div>
+                <div style={capsIv(10, I.muted, {letterSpacing:'.16em', marginTop:7})}>{l}</div>
+              </div>
+            ))}
           </div>
         )}
-        <div style={{display:'flex',gap:7,marginBottom:14,overflowX:'auto',paddingBottom:3}}>
+
+        {!customer && (
+          <button onClick={()=>setView('login')} style={{...sans, width:'100%', display:'flex', alignItems:'center', gap:14, textAlign:'left', background:I.cream, border:'1px solid ' + I.bord2, borderRadius:16, padding:'16px 18px', color:I.body, fontSize:14, lineHeight:1.55, cursor:'pointer', marginBottom:22}}>
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke={I.wine} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{flexShrink:0}}><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M3 10h18M7 15h4"/></svg>
+            <span><strong style={{color:I.wine, fontWeight:600}}>Scannez votre carte client</strong> pour retrouver votre cave à chaque visite et noter vos vins.</span>
+          </button>
+        )}
+
+        <div style={{display:'flex', gap:8, marginBottom:22, overflowX:'auto', paddingBottom:3}}>
           {['all','rouge','blanc','rosé','bulles'].map(f=>(
-            <button key={f} onClick={()=>setFilter(f)} style={{background:filter===f?C.wine:C.cream,color:filter===f?'#fdf8f0':C.wine,border:'1.5px solid '+(filter===f?C.wine:C.bord),borderRadius:50,padding:'5px 14px',fontSize:11,cursor:'pointer',fontFamily:'Montserrat,sans-serif',whiteSpace:'nowrap',flexShrink:0}}>
+            <button key={f} onClick={()=>setFilter(f)} style={{...sans, minHeight:44, padding:'0 18px', background:filter===f?I.wine:'transparent', color:filter===f?I.bg:I.ink, border:'1px solid ' + (filter===f?I.wine:I.bord2), borderRadius:999, fontSize:13, cursor:'pointer', whiteSpace:'nowrap', flexShrink:0}}>
               {f==='all'?'Tous':f.charAt(0).toUpperCase()+f.slice(1)}
             </button>
           ))}
         </div>
-        {filtered.length===0?(
-          <div style={{textAlign:'center',padding:'36px 0'}}>
-            <div style={{fontSize:48,marginBottom:10}}>🃏</div>
-            <div style={{...serif,fontSize:17,color:C.wine,marginBottom:7}}>Aucune carte collectionnée</div>
-            <p style={{fontSize:13,color:C.muted,marginBottom:18}}>Faites vos achats et collectionnez des cartes exclusives !</p>
-            <button onClick={()=>setView('selection')} style={{background:C.wine,color:'#fdf8f0',border:'none',borderRadius:50,padding:'10px 24px',cursor:'pointer',fontFamily:'Montserrat,sans-serif',fontSize:13}}>Trouver mon vin</button>
+
+        {filtered.length===0 ? (
+          <div style={{textAlign:'center', padding:'40px 10px'}}>
+            <div style={{...serif, fontSize:30, fontWeight:500, color:I.wine, marginBottom:10}}>{ownedWines.length ? 'Aucun vin de cette couleur' : 'Votre cave est vide'}</div>
+            <p style={{fontSize:15, color:I.body, lineHeight:1.7, margin:'0 auto 26px', maxWidth:380}}>Touchez « Garder dans ma cave » sur un vin conseillé pour le retrouver ici, puis le noter après dégustation.</p>
+            <button onClick={()=>setView('selection')} style={{...sans, minHeight:52, padding:'0 28px', background:I.wine, color:I.bg, border:'none', borderRadius:999, cursor:'pointer', fontSize:14, fontWeight:500}}>Trouver mon vin idéal</button>
           </div>
-        ):(
-          <div style={{display:'flex',flexWrap:'wrap',gap:12,justifyContent:'center'}}>
+        ) : (
+          <div style={{display:'flex', flexWrap:'wrap', gap:18, justifyContent:'center'}}>
             {filtered.map(w=>(
-              <div key={w.id} style={{display:'flex',flexDirection:'column',alignItems:'center',gap:5}}>
+              <div key={w.id} style={{display:'flex', flexDirection:'column', alignItems:'center', gap:8}}>
                 <WineCard wine={w} owned={collector.collection[w.id]||0} compact={true}/>
-                {customer&&(
+                {customer && (
                   <div style={{textAlign:'center'}}>
-                    <WineRating wineId={w.id} value={collector.ratings[w.id]||0} onRate={collector.rateWine}/>
-                    <div style={{fontSize:9,color:C.light,marginTop:2}}>{collector.ratings[w.id]?'Votre note':'Notez ce vin'}</div>
+                    <WineRating wineId={w.id} value={collector.ratings[w.id]||0} onRate={collector.rateWine} size={24}/>
+                    <div style={capsIv(9, I.muted, {letterSpacing:'.14em', marginTop:3})}>{collector.ratings[w.id] ? 'Votre note' : 'Notez ce vin'}</div>
                   </div>
                 )}
               </div>
@@ -2302,15 +2350,15 @@ function Admin({setView}) {
     reader.readAsText(file, 'utf-8');
   };
 
-  const TABS=[{id:'dashboard',label:'📊 Dashboard'},{id:'wines',label:'🍷 Catalogue'},{id:'stocks',label:'📦 Stocks'},{id:'stats',label:'📈 Stats'},{id:'reviews',label:'💬 Avis clients'},{id:'config',label:'⚙️ Config'}];
+  const TABS=[{id:'dashboard',label:'Tableau de bord'},{id:'wines',label:'Catalogue'},{id:'stocks',label:'Stocks'},{id:'stats',label:'Statistiques'},{id:'reviews',label:'Avis clients'},{id:'config',label:'Réglages'}];
 
   return (
     <div style={{minHeight:'100vh',background:C.bg}}>
-      {notif&&<div style={{position:'fixed',top:14,right:14,zIndex:999,background:notif.type==='success'?'#d4edda':'#f8d7da',border:'1px solid '+(notif.type==='success'?'#c3e6cb':'#f5c6cb'),borderRadius:10,padding:'10px 16px',fontSize:13,color:notif.type==='success'?'#155724':'#721c24',boxShadow:'0 4px 12px rgba(0,0,0,.1)'}}>{notif.type==='success'?'✅':'⚠️'} {notif.msg}</div>}
-      <Header title="Administration" onBack={()=>setView('home')} right={<span style={{fontSize:11,color:C.muted}}>{localWines.length} vins</span>}/>
+      {notif&&<div style={{position:'fixed',top:14,right:14,zIndex:999,background:notif.type==='success'?'#d4edda':'#f8d7da',border:'1px solid '+(notif.type==='success'?'#c3e6cb':'#f5c6cb'),borderRadius:10,padding:'10px 16px',fontSize:13,color:notif.type==='success'?'#155724':'#721c24',boxShadow:'0 4px 12px rgba(0,0,0,.1)'}}>{notif.type==='success'?'':''} {notif.msg}</div>}
+      <Header title="Espace gérant" subtitle={localWines.length + ' références'} onBack={()=>setView('home')}/>
       <div style={{background:C.cream,borderBottom:'1px solid '+C.bord,padding:'0 16px',display:'flex',gap:2,overflowX:'auto'}}>
         {TABS.map(t=>(
-          <button key={t.id} onClick={()=>setTab(t.id)} style={{background:'none',border:'none',borderBottom:'2.5px solid '+(tab===t.id?C.wine:'transparent'),color:tab===t.id?C.wine:C.muted,padding:'11px 13px',fontSize:12,cursor:'pointer',fontFamily:'Montserrat,sans-serif',fontWeight:tab===t.id?600:400,whiteSpace:'nowrap'}}>{t.label}</button>
+          <button key={t.id} onClick={()=>setTab(t.id)} style={{background:'none',border:'none',borderBottom:'2px solid '+(tab===t.id?C.wine:'transparent'),color:tab===t.id?C.wine:C.muted,padding:'16px 14px',minHeight:52,fontSize:13,letterSpacing:'.02em',cursor:'pointer',fontFamily:'Montserrat,sans-serif',fontWeight:tab===t.id?600:400,whiteSpace:'nowrap'}}>{t.label}</button>
         ))}
       </div>
       <div style={{maxWidth:860,margin:'0 auto',padding:'16px'}}>
@@ -2319,7 +2367,7 @@ function Admin({setView}) {
           <div>
             <div style={{...serif,fontSize:19,color:C.wine,marginBottom:14}}>Vue d'ensemble</div>
             <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:9,marginBottom:16}}>
-              {[['Références',localWines.length,'🍷'],['Sélection',nbSelection,'⭐'],['Prix moy.',avgPrice+'€','💰'],['Alertes',lowStock,'⚠️']].map(([l,v,i])=>(
+              {[['Références',localWines.length,''],['Sélection',nbSelection,''],['Prix moy.',avgPrice+'€',''],['Alertes',lowStock,'']].map(([l,v,i])=>(
                 <div key={l} style={{background:C.cream,border:'1px solid '+(l==='Alertes'&&lowStock>0?'#f5c6cb':C.bord),borderRadius:11,padding:'12px 8px',textAlign:'center'}}>
                   <div style={{fontSize:20}}>{i}</div>
                   <div style={{...serif,fontSize:18,fontWeight:700,color:l==='Alertes'&&lowStock>0?'#b91c1c':C.wine}}>{v}</div>
@@ -2353,7 +2401,7 @@ function Admin({setView}) {
             </div>
             <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
               <div style={{background:C.cream,border:'1px solid '+C.bord,borderRadius:11,padding:'13px'}}>
-                <div style={{...serif,fontSize:14,color:C.wine,marginBottom:9}}>📦 Plus gros stocks</div>
+                <div style={{...serif,fontSize:14,color:C.wine,marginBottom:9}}>Plus gros stocks</div>
                 {topStock.map((w,i)=><div key={w.id} style={{display:'flex',alignItems:'center',gap:7,padding:'4px 0',borderBottom:i<4?'1px solid '+C.bord:'none'}}>
                   <span style={{fontSize:10,fontWeight:700,color:C.gold,width:14}}>{i+1}</span>
                   <Bottle wine={w} h={34} label={false}/>
@@ -2362,7 +2410,7 @@ function Admin({setView}) {
                 </div>)}
               </div>
               <div style={{background:C.cream,border:'1px solid '+C.bord,borderRadius:11,padding:'13px'}}>
-                <div style={{...serif,fontSize:14,color:C.wine,marginBottom:9}}>💎 Top 5 premium</div>
+                <div style={{...serif,fontSize:14,color:C.wine,marginBottom:9}}>Top 5 premium</div>
                 {topPriced.map((w,i)=><div key={w.id} style={{display:'flex',alignItems:'center',gap:7,padding:'4px 0',borderBottom:i<4?'1px solid '+C.bord:'none'}}>
                   <span style={{fontSize:10,fontWeight:700,color:C.gold,width:14}}>{i+1}</span>
                   <Bottle wine={w} h={34} label={false}/>
@@ -2379,7 +2427,7 @@ function Admin({setView}) {
             <div style={{...serif,fontSize:19,color:C.wine,marginBottom:12}}>Catalogue — {filtered.length} vins</div>
             {overstockSuggestions.length>0&&(
               <div style={{background:'rgba(212,175,55,.08)',border:'1px solid '+C.gold,borderRadius:12,padding:'11px 13px',marginBottom:11}}>
-                <div style={{fontSize:11,fontWeight:700,color:C.light,textTransform:'uppercase',letterSpacing:'.04em',marginBottom:8}}>💡 Suggestions — stock élevé pour leur tranche</div>
+                <div style={{fontSize:11,fontWeight:700,color:C.light,textTransform:'uppercase',letterSpacing:'.04em',marginBottom:8}}>Suggestions — stock élevé pour leur tranche</div>
                 <div style={{display:'flex',flexDirection:'column',gap:6}}>
                   {overstockSuggestions.map(w=>(
                     <div key={w.id} style={{display:'flex',alignItems:'center',gap:8,background:'#fff',border:'1px solid '+C.bord,borderRadius:8,padding:'6px 10px'}}>
@@ -2394,7 +2442,7 @@ function Admin({setView}) {
               </div>
             )}
             <div style={{background:C.cream,border:'1px solid '+C.bord,borderRadius:12,padding:'11px 13px',marginBottom:11}}>
-              <input style={{width:'100%',background:C.bg,border:'1px solid '+C.bord,color:C.text,borderRadius:8,padding:'7px 11px',fontSize:13,outline:'none',fontFamily:'Montserrat,sans-serif',marginBottom:8}} value={search} onChange={e=>setSearch(e.target.value)} placeholder="🔍 Nom, région, cépage..."/>
+              <input style={{width:'100%',background:C.bg,border:'1px solid '+C.bord,color:C.text,borderRadius:8,padding:'7px 11px',fontSize:13,outline:'none',fontFamily:'Montserrat,sans-serif',marginBottom:8}} value={search} onChange={e=>setSearch(e.target.value)} placeholder="Nom, région, cépage..."/>
               <div style={{display:'flex',gap:5,flexWrap:'wrap',marginBottom:6}}>
                 {['all','rouge','blanc','rosé','bulles'].map(f=>(
                   <button key={f} onClick={()=>setTypeFilter(f)} style={{background:typeFilter===f?C.wine:C.cream,color:typeFilter===f?'#fdf8f0':C.wine,border:'1.5px solid '+(typeFilter===f?C.wine:C.bord),borderRadius:50,padding:'4px 12px',fontSize:11,cursor:'pointer',fontFamily:'Montserrat,sans-serif'}}>
@@ -2425,7 +2473,7 @@ function Admin({setView}) {
                       <div style={{fontSize:11,color:C.muted}}>{w.region} · {w.type}</div>
                     </div>
                     <div style={{display:'flex',alignItems:'center',gap:7,flexShrink:0}}>
-                      {w.stock<10&&<span style={{fontSize:9,background:'#f8d7da',color:'#721c24',borderRadius:50,padding:'2px 6px',fontWeight:600}}>⚠️{w.stock}</span>}
+                      {w.stock<10&&<span style={{fontSize:9,background:'#f8d7da',color:'#721c24',borderRadius:50,padding:'2px 6px',fontWeight:600}}>{w.stock}</span>}
                       <div style={{textAlign:'right'}}><div style={{...serif,fontSize:14,fontWeight:700,color:C.wine}}>{w.price}€</div><div style={{fontSize:9,color:C.light}}>{w.stock} btl{margeDe(w)!==null ? ' · marge ' + fmtEuro(margeDe(w)) : ''}</div></div>
                       <span style={{color:C.light,fontSize:10,transition:'transform .2s',display:'inline-block',transform:expanded===w.id?'rotate(180deg)':'none'}}>▼</span>
                     </div>
@@ -2444,8 +2492,8 @@ function Admin({setView}) {
                       {w.pairings&&w.pairings.length>0&&<div style={{marginBottom:8}}><div style={{fontSize:10,color:C.muted,marginBottom:4}}>Accords</div><div style={{display:'flex',gap:4,flexWrap:'wrap'}}>{w.pairings.map(p=><span key={p} style={{fontSize:10,background:'rgba(107,31,42,.07)',color:C.wine,padding:'2px 7px',borderRadius:50}}>{p}</span>)}</div></div>}
                       <div style={{fontSize:11,fontStyle:'italic',color:C.muted,lineHeight:1.5,marginBottom:9}}>{w.tastingNotes}</div>
                       <div style={{display:'flex',gap:7,alignItems:'center',flexWrap:'wrap'}}>
-                        <button onClick={()=>setEditWine({...w})} style={{background:'rgba(107,31,42,.07)',color:C.wine,border:'1px solid '+C.bord,borderRadius:50,padding:'5px 13px',fontSize:11,cursor:'pointer',fontFamily:'Montserrat,sans-serif'}}>✏️ Stock</button>
-                        <button onClick={()=>{setLocalWines(p=>{const next=p.map(x=>x.id===w.id?{...x,featured:!x.featured,featuredReason:!x.featured?(x.featuredReason||'stock'):x.featuredReason}:x);persistOverrides(next);return next;});notify(w.featured?'Retiré de la sélection':'Ajouté à la sélection');}} style={{background:'rgba(212,175,55,.1)',color:C.light,border:'1px solid '+C.gold,borderRadius:50,padding:'5px 13px',fontSize:11,cursor:'pointer',fontFamily:'Montserrat,sans-serif'}}>{w.featured?'⭐ Retirer':'⭐ Sélection'}</button>
+                        <button onClick={()=>setEditWine({...w})} style={{background:'rgba(107,31,42,.07)',color:C.wine,border:'1px solid '+C.bord,borderRadius:50,padding:'5px 13px',fontSize:11,cursor:'pointer',fontFamily:'Montserrat,sans-serif'}}>Stock</button>
+                        <button onClick={()=>{setLocalWines(p=>{const next=p.map(x=>x.id===w.id?{...x,featured:!x.featured,featuredReason:!x.featured?(x.featuredReason||'stock'):x.featuredReason}:x);persistOverrides(next);return next;});notify(w.featured?'Retiré de la sélection':'Ajouté à la sélection');}} style={{background:'rgba(212,175,55,.1)',color:C.light,border:'1px solid '+C.gold,borderRadius:50,padding:'5px 13px',fontSize:11,cursor:'pointer',fontFamily:'Montserrat,sans-serif'}}>{w.featured?'Retirer':'Sélection'}</button>
                         {w.featured&&(
                           <select value={w.featuredReason||'stock'} onChange={e=>{const val=e.target.value;setLocalWines(p=>{const next=p.map(x=>x.id===w.id?{...x,featuredReason:val}:x);persistOverrides(next);return next;});}}
                             style={{fontSize:11,color:C.wine,border:'1px solid '+C.bord,borderRadius:50,padding:'5px 10px',background:'#fff',fontFamily:'Montserrat,sans-serif',cursor:'pointer'}}>
@@ -2465,9 +2513,9 @@ function Admin({setView}) {
           <div>
             <div style={{...serif,fontSize:19,color:C.wine,marginBottom:6}}>Gestion des stocks</div>
             {lowStockW.length===0
-              ? <div style={{textAlign:'center',padding:'40px 0'}}><div style={{fontSize:44,marginBottom:8}}>✅</div><div style={{...serif,fontSize:16,color:C.wine}}>Tous les stocks sont bons</div></div>
+              ? <div style={{textAlign:'center',padding:'40px 0'}}><div style={{fontSize:44,marginBottom:8}}></div><div style={{...serif,fontSize:16,color:C.wine}}>Tous les stocks sont bons</div></div>
               : <>
-                  <div style={{background:'#fff3cd',border:'1px solid #ffc107',borderRadius:11,padding:'11px 14px',marginBottom:14,fontSize:13,color:'#856404'}}>⚠️ <strong>{lowStockW.length} vin{lowStockW.length>1?'s':''}</strong> avec stock inférieur à 10 bouteilles</div>
+                  <div style={{background:'#fff3cd',border:'1px solid #ffc107',borderRadius:11,padding:'11px 14px',marginBottom:14,fontSize:13,color:'#856404'}}><strong>{lowStockW.length} vin{lowStockW.length>1?'s':''}</strong> avec stock inférieur à 10 bouteilles</div>
                   <div style={{display:'flex',flexDirection:'column',gap:7}}>
                     {lowStockW.map(w=>(
                       <div key={w.id} style={{background:C.cream,border:'1.5px solid '+(w.stock<3?'#f5c6cb':'#ffc107'),borderRadius:11,padding:'11px 13px',display:'flex',alignItems:'center',gap:9}}>
@@ -2487,7 +2535,7 @@ function Admin({setView}) {
           <div>
             <div style={{...serif,fontSize:19,color:C.wine,marginBottom:14}}>Statistiques</div>
             <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:9,marginBottom:14}}>
-              {[['Valeur totale',totalValue+'€','💎'],['Prix médian',[...localWines].sort((a,b)=>a.price-b.price)[Math.floor(localWines.length/2)]?.price+'€','📊'],['Bouteilles',localWines.reduce((s,w)=>s+w.stock,0),'📦']].map(([l,v,i])=>(
+              {[['Valeur totale',totalValue+'€',''],['Prix médian',[...localWines].sort((a,b)=>a.price-b.price)[Math.floor(localWines.length/2)]?.price+'€',''],['Bouteilles',localWines.reduce((s,w)=>s+w.stock,0),'']].map(([l,v,i])=>(
                 <div key={l} style={{background:C.cream,border:'1px solid '+C.bord,borderRadius:11,padding:'12px 8px',textAlign:'center'}}>
                   <div style={{fontSize:20,marginBottom:3}}>{i}</div>
                   <div style={{...serif,fontSize:15,fontWeight:700,color:C.wine}}>{v}</div>
@@ -2526,10 +2574,10 @@ function Admin({setView}) {
           <div>
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14}}>
               <div style={{...serif,fontSize:19,color:C.wine}}>Avis clients</div>
-              {ratedWines.length>0&&<button onClick={exportReviewsCSV} style={{background:C.wine,color:'#fdf8f0',border:'none',borderRadius:50,padding:'7px 16px',fontSize:12,cursor:'pointer',fontFamily:'Montserrat,sans-serif'}}>⬇️ Export CSV</button>}
+              {ratedWines.length>0&&<button onClick={exportReviewsCSV} style={{background:C.wine,color:'#fdf8f0',border:'none',borderRadius:50,padding:'7px 16px',fontSize:12,cursor:'pointer',fontFamily:'Montserrat,sans-serif'}}>Export CSV</button>}
             </div>
             <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:9,marginBottom:16}}>
-              {[['Clients inscrits',nbClients,'👥'],['Avis déposés',totalReviews,'💬'],['Note moyenne',totalReviews?globalAvg.toFixed(1)+'/5':'—','⭐'],['Vins notés',ratedWines.length,'🍷']].map(([l,v,i])=>(
+              {[['Clients inscrits',nbClients,''],['Avis déposés',totalReviews,''],['Note moyenne',totalReviews?globalAvg.toFixed(1)+'/5':'—',''],['Vins notés',ratedWines.length,'']].map(([l,v,i])=>(
                 <div key={l} style={{background:C.cream,border:'1px solid '+C.bord,borderRadius:11,padding:'12px 8px',textAlign:'center'}}>
                   <div style={{fontSize:20}}>{i}</div>
                   <div style={{...serif,fontSize:18,fontWeight:700,color:C.wine}}>{v}</div>
@@ -2539,7 +2587,7 @@ function Admin({setView}) {
             </div>
             {ratedWines.length===0?(
               <div style={{background:C.cream,border:'1px solid '+C.bord,borderRadius:11,padding:'34px 18px',textAlign:'center'}}>
-                <div style={{fontSize:40,marginBottom:9}}>💬</div>
+                <div style={{fontSize:40,marginBottom:9}}></div>
                 <div style={{...serif,fontSize:16,color:C.wine,marginBottom:6}}>Aucun avis pour le moment</div>
                 <p style={{fontSize:12,color:C.muted,lineHeight:1.6}}>Les notes laissées par les clients connectés (carte pass) sur les vins de leur collection apparaîtront ici, pour vous aider à ajuster le stock selon ce qui plaît vraiment.</p>
               </div>
@@ -2563,7 +2611,7 @@ function Admin({setView}) {
               </div>
             )}
             {ratedWines.some(r=>r.avg<=2.5)&&(
-              <div style={{background:'#fff8f0',border:'1px solid #f5d9c6',borderRadius:8,padding:'9px 13px',fontSize:12,color:'#8a4b1f',marginTop:11}}>💡 Les vins « À revoir » sont peu appréciés par vos clients : pensez à réduire leur réassort ou à les remplacer.</div>
+              <div style={{background:'#fff8f0',border:'1px solid #f5d9c6',borderRadius:8,padding:'9px 13px',fontSize:12,color:'#8a4b1f',marginTop:11}}>Les vins « À revoir » sont peu appréciés par vos clients : pensez à réduire leur réassort ou à les remplacer.</div>
             )}
           </div>
         )}
@@ -2572,7 +2620,7 @@ function Admin({setView}) {
           <div style={{display:'flex',flexDirection:'column',gap:11}}>
             <div style={{...serif,fontSize:19,color:C.wine,marginBottom:4}}>Configuration</div>
             <div style={{background:C.cream,border:'1px solid '+C.bord,borderRadius:11,padding:'14px'}}>
-              <div style={{...serif,fontSize:14,color:C.wine,marginBottom:6}}>🎯 Stratégie de recommandation</div>
+              <div style={{...serif,fontSize:14,color:C.wine,marginBottom:6}}>Stratégie de recommandation</div>
               <p style={{fontSize:12,color:C.muted,marginBottom:11,lineHeight:1.6}}>Le sommelier choisit toujours d'abord les vins les mieux accordés à la demande du client, dans son budget. La stratégie sert uniquement à départager des vins également pertinents ; elle ne change jamais ce que le sommelier dit des vins.</p>
               <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
                 {STRATEGIES_RECO.map(s => {
@@ -2587,29 +2635,29 @@ function Admin({setView}) {
               </div>
             </div>
             <div style={{background:C.cream,border:'1px solid '+C.bord,borderRadius:11,padding:'14px'}}>
-              <div style={{...serif,fontSize:14,color:C.wine,marginBottom:6}}>📥 Import du stock magasin (Excel / CSV)</div>
+              <div style={{...serif,fontSize:14,color:C.wine,marginBottom:6}}>Import du stock magasin (Excel / CSV)</div>
               <p style={{fontSize:12,color:C.muted,marginBottom:11,lineHeight:1.6}}>Mettez à jour le stock de ce magasin en une fois : depuis Excel, enregistrez votre fichier au format CSV avec les colonnes <strong>id;nom;stock;prix;prix_achat</strong> (ou simplement <strong>id;stock</strong>), puis importez-le ici. Les lignes inconnues sont ignorées.</p>
               <p style={{fontSize:12,color:C.muted,marginBottom:11,lineHeight:1.6}}>La colonne <strong>prix_achat</strong> est facultative : elle sert uniquement à la stratégie « Marge » et à l'affichage de la marge dans l'onglet Catalogue. Elle reste confidentielle : jamais montrée aux clients ni transmise au sommelier.</p>
               <p style={{fontSize:12,color:C.muted,marginBottom:11,lineHeight:1.6}}>Fiche produit, également facultative : colonnes <strong>domaine</strong>, <strong>cuvee</strong>, <strong>millesime</strong>, <strong>photo</strong> (ex. photos/123.jpg, image placée dans le dossier photos de la borne) et <strong>emplacement</strong> (ex. Allée 12 · Étagère 3). Elles s'affichent sur l'écran des résultats et dans la fiche du vin. Une cellule vide ne modifie rien.</p>
               <div style={{display:'flex',gap:9,alignItems:'center',flexWrap:'wrap'}}>
                 <input type="file" accept=".csv,.txt" onChange={e=>{handleCSVImport(e.target.files[0]); e.target.value='';}} style={{fontSize:12,fontFamily:'Montserrat,sans-serif',color:C.text}}/>
-                <button onClick={telechargerModeleCSV} style={{background:'transparent',color:C.wine,border:'1px solid '+C.bord2,borderRadius:50,padding:'7px 14px',fontSize:12,cursor:'pointer',fontFamily:'Montserrat,sans-serif'}}>⬇️ Télécharger le modèle (catalogue actuel)</button>
+                <button onClick={telechargerModeleCSV} style={{background:'transparent',color:C.wine,border:'1px solid '+C.bord2,borderRadius:50,padding:'7px 14px',fontSize:12,cursor:'pointer',fontFamily:'Montserrat,sans-serif'}}>Télécharger le modèle (catalogue actuel)</button>
               </div>
-              <div style={{background:'#f0f4ff',border:'1px solid #d0d8ff',borderRadius:8,padding:'9px 13px',fontSize:12,color:'#4040a0',marginTop:11}}>💡 Les stocks importés sont conservés sur la borne, même après redémarrage.</div>
+              <div style={{background:'#f0f4ff',border:'1px solid #d0d8ff',borderRadius:8,padding:'9px 13px',fontSize:12,color:'#4040a0',marginTop:11}}>Les stocks importés sont conservés sur la borne, même après redémarrage.</div>
             </div>
             <div style={{background:C.cream,border:'1px solid '+C.bord,borderRadius:11,padding:'14px'}}>
-              <div style={{...serif,fontSize:14,color:C.wine,marginBottom:6}}>🛟 Sauvegarde serveur</div>
+              <div style={{...serif,fontSize:14,color:C.wine,marginBottom:6}}>Sauvegarde serveur</div>
               <p style={{fontSize:12,color:C.muted,marginBottom:11,lineHeight:1.6}}>Les profils clients, notes et stocks sont automatiquement copiés sur le serveur à chaque modification. Si la borne a été réinstallée ou le cache du navigateur vidé, restaurez la dernière copie sauvegardée ici.</p>
               <div style={{display:'flex',gap:9,flexWrap:'wrap'}}>
                 <button onClick={async()=>{
                   const r = await restoreFromServer();
                   if(r.profiles||r.ratings||r.stock){ notify('Données restaurées depuis le serveur — rechargement...'); setTimeout(()=>window.location.reload(), 1200); }
                   else { notify('Aucune sauvegarde serveur trouvée','error'); }
-                }} style={{background:C.wine,color:'#fdf8f0',border:'none',borderRadius:50,padding:'8px 16px',fontSize:12,cursor:'pointer',fontFamily:'Montserrat,sans-serif'}}>♻️ Restaurer depuis le serveur</button>
-                <button onClick={exportDataJSON} style={{background:'transparent',color:C.wine,border:'1px solid '+C.bord2,borderRadius:50,padding:'8px 16px',fontSize:12,cursor:'pointer',fontFamily:'Montserrat,sans-serif'}}>⬇️ Exporter mes données (JSON)</button>
+                }} style={{background:C.wine,color:'#fdf8f0',border:'none',borderRadius:50,padding:'8px 16px',fontSize:12,cursor:'pointer',fontFamily:'Montserrat,sans-serif'}}>Restaurer depuis le serveur</button>
+                <button onClick={exportDataJSON} style={{background:'transparent',color:C.wine,border:'1px solid '+C.bord2,borderRadius:50,padding:'8px 16px',fontSize:12,cursor:'pointer',fontFamily:'Montserrat,sans-serif'}}>Exporter mes données (JSON)</button>
               </div>
             </div>
-            {[{title:'🏪 Magasin',fields:[['Nom','Carrefour Paris Bastille'],['Adresse','12 Rue de la Roquette, 75011'],['Responsable','Jean Dupont'],['Email','paris@wineselect.fr']]},{title:'🏆 Programme fidélité',fields:[['Seuil bronze','5 cartes'],['Réduction bronze','5%'],['Seuil argent','10 cartes'],['Réduction argent','10%'],['Seuil or','20 cartes'],['Réduction or','15%']]}].map(({title,fields})=>(
+            {[{title:'Magasin',fields:[['Nom','Carrefour Paris Bastille'],['Adresse','12 Rue de la Roquette, 75011'],['Responsable','Jean Dupont'],['Email','paris@wineselect.fr']]},{title:'Programme fidélité',fields:[['Seuil bronze','5 cartes'],['Réduction bronze','5%'],['Seuil argent','10 cartes'],['Réduction argent','10%'],['Seuil or','20 cartes'],['Réduction or','15%']]}].map(({title,fields})=>(
               <div key={title} style={{background:C.cream,border:'1px solid '+C.bord,borderRadius:11,padding:'14px'}}>
                 <div style={{...serif,fontSize:14,color:C.wine,marginBottom:11}}>{title}</div>
                 <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:9,marginBottom:10}}>
@@ -2622,14 +2670,14 @@ function Admin({setView}) {
               </div>
             ))}
             <div style={{background:C.cream,border:'1px solid '+C.bord,borderRadius:11,padding:'14px'}}>
-              <div style={{...serif,fontSize:14,color:C.wine,marginBottom:6}}>🔗 Intégration logiciel de caisse</div>
+              <div style={{...serif,fontSize:14,color:C.wine,marginBottom:6}}>Intégration logiciel de caisse</div>
               <p style={{fontSize:12,color:C.muted,marginBottom:11,lineHeight:1.6}}>Connectez WineSelect à votre logiciel de caisse pour valider automatiquement les achats.</p>
               <div style={{display:'flex',gap:7,flexWrap:'wrap',marginBottom:11}}>
                 {['Lightspeed','Tiller','Zelty','Storeline','Autre'].map(s=>(
                   <button key={s} onClick={()=>notify('Contactez-nous pour configurer '+s)} style={{background:C.bg,border:'1px solid '+C.bord,color:C.wine,borderRadius:50,padding:'5px 13px',fontSize:11,cursor:'pointer',fontFamily:'Montserrat,sans-serif'}}>{s}</button>
                 ))}
               </div>
-              <div style={{background:'#f0f4ff',border:'1px solid #d0d8ff',borderRadius:8,padding:'9px 13px',fontSize:12,color:'#4040a0'}}>💡 L'intégration caisse permet la validation automatique des achats pour le programme collectors.</div>
+              <div style={{background:'#f0f4ff',border:'1px solid #d0d8ff',borderRadius:8,padding:'9px 13px',fontSize:12,color:'#4040a0'}}>L'intégration caisse permet la validation automatique des achats pour le programme collectors.</div>
             </div>
             <div style={{background:C.cream,border:'1px solid '+C.bord,borderRadius:11,padding:'14px'}}>
               <div style={{...serif,fontSize:14,color:C.wine,marginBottom:6}}>Sommelier — IA</div>
@@ -2726,8 +2774,8 @@ function App() {
       {view!=='home' && view!=='admin' && (
         <button
           onClick={()=>{ customerApi.logout(); setResults([]); setView('home'); try{ sessionStorage.removeItem('ws_age_ok'); }catch(e){} setAgeOk(false); }}
-          style={{position:'fixed', bottom:20, right:20, zIndex:50, background:C.wine, color:'#fff', border:'none', borderRadius:50, padding:'12px 22px', fontSize:13, fontWeight:600, cursor:'pointer', boxShadow:'0 4px 14px rgba(94,22,34,.3)', fontFamily:'Montserrat,sans-serif'}}
-        >✓ J'ai terminé</button>
+          style={{position:'fixed', ...(view==='chat' ? {top:22} : {bottom:56}), right:'max(20px, calc(50% - 316px))', zIndex:50, minHeight:46, background:view==='chat' ? '#ffffff' : C.wine, color:view==='chat' ? C.wine : '#faf6ee', border:'1px solid ' + C.wine, borderRadius:999, padding:'0 22px', fontSize:13, fontWeight:500, letterSpacing:'.03em', cursor:'pointer', boxShadow:view==='chat' ? 'none' : '0 12px 30px rgba(94,22,34,.22)', fontFamily:'Montserrat,sans-serif'}}
+        >J'ai terminé</button>
       )}
       <div style={{height:34}}/>
       <SanteBanner/>
