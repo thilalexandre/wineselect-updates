@@ -347,6 +347,43 @@ function vivier(lst, couleurGardee) {
   return gardes.concat(base.filter(n => !gardes.includes(n)));
 }
 const ARTICLE = { rouge: 'du rouge', blanc: 'du blanc', 'rosé': 'du rosé', bulles: 'des bulles' };
+
+// ── Stratégie de recommandation du magasin (Admin > Config) ─────────────────
+// Elle ne fait que DÉPARTAGER des vins également bien accordés : un petit bonus
+// (0 à STRATEGIE_BONUS_MAX points) selon la position du vin parmi les candidats,
+// bien inférieur aux écarts d'accord. Elle agit sur la présélection, jamais sur
+// ce que le sommelier dit des vins. Les prix d'achat restent confidentiels :
+// ils ne servent qu'ici et ne sont jamais envoyés au sommelier.
+//   neutre : aucun bonus (comportement historique)
+//   panier : les prix les plus hauts parmi les candidats
+//   marge  : la marge brute en euros la plus élevée (vins sans prix d'achat : aucun bonus)
+//   stock  : les stocks les plus élevés
+const STRATEGIE_BONUS_MAX = 4;
+let STRATEGIE = { id: 'neutre', prixAchat: {} };
+function definirStrategie(id, prixAchat) {
+  STRATEGIE = {
+    id: ['neutre', 'panier', 'marge', 'stock'].includes(id) ? id : 'neutre',
+    prixAchat: prixAchat && typeof prixAchat === 'object' ? prixAchat : {},
+  };
+}
+// Renvoie une fonction vin → bonus, calculée sur la liste de candidats fournie
+// (rang du vin dans cette liste selon le critère de la stratégie).
+function bonusStrategie(vins) {
+  const id = STRATEGIE.id;
+  if (id === 'neutre' || !vins.length) return () => 0;
+  const critere = w => {
+    if (id === 'panier') return w.price;
+    if (id === 'stock') return typeof w.stock === 'number' ? w.stock : null;
+    const pa = STRATEGIE.prixAchat[w.id];
+    return typeof pa === 'number' && pa > 0 ? w.price - pa : null;
+  };
+  const valeurs = [...new Set(vins.map(critere).filter(v => v !== null))].sort((a, b) => a - b);
+  if (valeurs.length < 2) return () => 0;
+  return w => {
+    const v = critere(w);
+    return v === null ? 0 : STRATEGIE_BONUS_MAX * valeurs.indexOf(v) / (valeurs.length - 1);
+  };
+}
 const PLURIEL = { rouge: 'rouges', blanc: 'blancs', 'rosé': 'rosés', bulles: 'vins effervescents' };
 
 function construireCandidats(wines, d, budget, featuredSet, texteClient, aleatoire) {
@@ -372,6 +409,11 @@ function construireCandidats(wines, d, budget, featuredSet, texteClient, aleatoi
     }
   }
   notes.sort((a, b) => (b.score + bonusSel(b.wine)) - (a.score + bonusSel(a.wine)) || b.wine.rating - a.wine.rating);
+  // Stratégie du magasin : départage les vins d'accord équivalent (voir bonusStrategie)
+  const bonusStrat = bonusStrategie(notes.map(n => n.wine));
+  if (STRATEGIE.id !== 'neutre') {
+    notes.sort((a, b) => (b.score + bonusSel(b.wine) + bonusStrat(b.wine)) - (a.score + bonusSel(a.wine) + bonusStrat(a.wine)) || b.wine.rating - a.wine.rating);
+  }
   const parId = new Map(notes.map(n => [n.wine.id, n]));
   const bonusGarde = n => (compromis && n.wine.type === compromis.couleur) ? 30 : 0;
 
@@ -398,7 +440,7 @@ function construireCandidats(wines, d, budget, featuredSet, texteClient, aleatoi
     ];
     tierWines = tiers.map((target, i) => {
       const cands = bandes[i].length ? bandes[i] : pool;
-      const val = n => n.score + bonusSel(n.wine) + bonusGarde(n) - Math.abs(n.wine.price - target) / target * 20;
+      const val = n => n.score + bonusSel(n.wine) + bonusStrat(n.wine) + bonusGarde(n) - Math.abs(n.wine.price - target) / target * 20;
       return [...cands].sort((a, b) => val(b) - val(a)).slice(0, 5).map(n => n.wine);
     });
     available = [...new Set(tierWines.flat())];
@@ -855,8 +897,9 @@ function candidatsGuides(wines, demande) {
   // bas de tranche pour cuisiner (pas besoin d'un grand vin dans la casserole).
   const ref = ouvert ? null : budget.min + (budget.max - budget.min) * (occasion === 'cuisiner' ? 0.25 : 0.75);
   const span = ouvert ? 1 : Math.max(1, budget.max - budget.min);
+  const bonusStrat = bonusStrategie(notes.map(n => n.wine));
   const val = n => n.score + (featuredSet.has(n.wine.id) ? 8 : 0) + ((compromis && n.wine.type === compromis.couleur) ? 30 : 0) +
-    (ref === null ? 0 : Math.max(0, 1 - Math.abs(n.wine.price - ref) / span) * 8);
+    (ref === null ? 0 : Math.max(0, 1 - Math.abs(n.wine.price - ref) / span) * 8) + bonusStrat(n.wine);
   notes.sort((a, b) => val(b) - val(a) || (b.wine.rating || 0) - (a.wine.rating || 0));
 
   let retenus = vivier(notes, compromis ? compromis.couleur : null).slice(0, 14);
@@ -1237,4 +1280,5 @@ module.exports = {
   decrireProfil, decrirePlat, nettoyer, REGLAGES,
   platDepuisCategorie, noterStyle, noterRecette, analyserRecette, candidatsGuides, GOUTS, RECETTES,
   appelMistral, preparerSommelier, selectionGuidee, couleursConseillees,
+  definirStrategie, profilerVin,
 };

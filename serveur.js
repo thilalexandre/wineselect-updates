@@ -134,7 +134,21 @@ app.post('/api/admin-auth', (req, res) => {
   res.json({ ok: false });
 });
 
-app.use(express.static(path.join(__dirname)));
+// Fichiers servis au navigateur : UNIQUEMENT ce dont la page a besoin (l'appli,
+// le catalogue, les photos, images et polices). Avant, tout le dossier était
+// servi : n'importe qui sur le réseau de la borne pouvait lire api-key.txt,
+// admin-pin.txt, le code du serveur ou data/*.json (dont les prix d'achat)
+// en tapant simplement leur adresse.
+const STATIC_EXT_OK = /\.(html|css|png|jpe?g|webp|gif|svg|ico|woff2?|ttf|otf)$/i;
+const servirFichier = express.static(path.join(__dirname), { dotfiles: 'deny', index: false });
+app.use((req, res, next) => {
+  let p;
+  try { p = decodeURIComponent(req.path); } catch (e) { return res.status(400).end(); }
+  const autorise = p === '/wines-data.js' || p.startsWith('/photos/') ||
+    (!p.startsWith('/data/') && !p.startsWith('/node_modules/') && STATIC_EXT_OK.test(p));
+  if (autorise) return servirFichier(req, res, next);
+  next();
+});
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'WineSelect.html')));
 
 // ── Limitation de débit sur les routes qui appellent l'API Mistral ─────────
@@ -232,6 +246,62 @@ makePersistedRoute('stock-overrides', {
   onWrite: () => applyStockOverrides(),
 });
 
+// ── Stratégie de recommandation (Admin > Config) ────────────────────────────
+// { strategie: 'neutre' | 'panier' | 'marge' | 'stock' }. Lecture libre (la page
+// l'affiche dans l'admin), écriture réservée au gérant. Le moteur d'accords
+// l'applique aussitôt, uniquement pour départager des vins d'accord équivalent.
+makePersistedRoute('config-reco', {
+  protect: true,
+  defaultValue: { strategie: 'neutre' },
+  onWrite: () => appliquerStrategie(),
+});
+
+// ── Prix d'achat (confidentiels) ────────────────────────────────────────────
+// { "<id du vin>": prix d'achat }. Lecture ET écriture réservées au gérant : ils
+// ne sont jamais montrés aux clients ni envoyés au sommelier. L'import CSV
+// n'envoie que les lignes renseignées : on les FUSIONNE avec l'existant.
+app.get('/api/prix-achat', requireAdminToken, (req, res) => {
+  res.json(readJSON('prix-achat', {}));
+});
+app.post('/api/prix-achat', requireAdminToken, (req, res) => {
+  try {
+    const actuels = readJSON('prix-achat', {});
+    const recus = (req.body && typeof req.body === 'object') ? req.body : {};
+    Object.keys(recus).forEach(id => {
+      const v = Number(String(recus[id]).replace(',', '.'));
+      if (/^\d+$/.test(id) && isFinite(v) && v > 0) actuels[id] = Math.round(v * 100) / 100;
+    });
+    writeJSONAtomic('prix-achat', actuels);
+    appliquerStrategie();
+    res.json({ ok: true, total: Object.keys(actuels).length });
+  } catch (e) {
+    console.error('❌ Écriture data/prix-achat.json impossible :', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+function appliquerStrategie() {
+  if (!ACCORDS || !ACCORDS.definirStrategie) return;
+  const conf = readJSON('config-reco', {});
+  ACCORDS.definirStrategie(conf && conf.strategie, readJSON('prix-achat', {}));
+  console.log('🎯 Stratégie de recommandation : ' + ((conf && conf.strategie) || 'neutre'));
+}
+
+// ── Profils gustatifs (repli local de la sélection guidée) ──────────────────
+// Si le serveur d'accords ne répond pas pendant un parcours guidé, la page trie
+// elle-même les vins par goût avec ces profils (corps, tanins, fraîcheur...).
+app.get('/profils-vins', (req, res) => {
+  if (!ACCORDS || !ACCORDS.profilerVin) return res.json({});
+  const profils = {};
+  WINES_CATALOG.forEach(w => {
+    try {
+      const p = w.profil || ACCORDS.profilerVin(w);
+      profils[w.id] = { corps: p.corps, tanins: p.tanins || 0, fraicheur: p.fraicheur, boise: p.boise || 0, sucrosite: p.sucrosite || 0 };
+    } catch (e) {}
+  });
+  res.json(profils);
+});
+
 // ── Chargement du catalogue ───────────────────────────────────────────────────
 // BASE_CATALOG = données brutes de wines-data.js, jamais modifiées en mémoire.
 // WINES_CATALOG = BASE_CATALOG + overrides stock/prix/mise en avant importés
@@ -267,6 +337,7 @@ function loadCatalog() {
     BASE_CATALOG = sandbox.window.WINES_DATA || [];
     console.log('📦 Catalogue:', BASE_CATALOG.length, 'vins depuis wines-data.js');
     applyStockOverrides();
+    appliquerStrategie();
   } catch(e) {
     console.warn('⚠️  Erreur catalogue:', e.message);
   }
