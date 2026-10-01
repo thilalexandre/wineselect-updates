@@ -1758,7 +1758,7 @@ function Mystery({setView, collector}) {
 // ── CHAT ──────────────────────────────────────────────────────────────────────
 function Chat({setView, collector, customer}) {
   // RGPD : aucun nom/identifiant client dans les messages (ils sont transmis à l'API IA)
-  const initMsg = {role:'assistant', text:(customer?"Bonjour, ravi de vous revoir ! 🍷":"Bonjour ! Je suis le sommelier de votre magasin. 🍷")+"\n\nPosez-moi n'importe quelle question sur le vin — budget, accord, cépage, occasion...\nJe vous guide vers le vin parfait !", wines:[]};
+  const initMsg = {role:'assistant', text:(customer?"Bonjour, ravi de vous revoir.":"Bonjour, je suis le sommelier de votre magasin.")+"\n\nDites-moi ce que vous préparez, votre budget ou vos goûts : je vous propose trois vins de notre rayon.", wines:[]};
   // Prompt enrichi avec les goûts du client connecté (notes de sa collection)
   const persoPrompt = useMemo(()=>{
     if (!customer) return SYS_PROMPT;
@@ -1797,66 +1797,108 @@ function Chat({setView, collector, customer}) {
   };
 
   const handleCollect = wine => { collector.addWine(wine.id); setAdded(wine.id); setTimeout(()=>setAdded(null),2500); };
-  const micColors = {off:{background:'rgba(107,31,42,.1)',color:C.wine}, listening:{background:C.wine,color:'#fdf8f0'}, speaking:{background:C.gold,color:'#2d0c13'}};
-  const micIcons  = {off:'🎙', listening:'✅', speaking:'🔊'};
+  const enCave = w => added===w.id || ((collector.collection||{})[w.id]||0) > 0;
   const labels = ['Sélection accessible','Au cœur du budget','Montée en gamme'];
+  // Direction « Ivoire épuré » : mêmes fonctions, nouvel habillage.
+  const I = C_IVOIRE;
+  const sans = {fontFamily:'Montserrat,sans-serif'};
+  const suggestions = ['Un vin pour un poulet rôti', 'Un blanc sec autour de 12 €', 'Une bouteille à offrir', 'Quel vin avec une raclette ?'];
+  const IconeMicro = () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></svg>;
+  const IconeValider = () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>;
+  const IconeSon = () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/></svg>;
+  const IconeEnvoyer = () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>;
+  const peutEnvoyer = !!input.trim() && !loading;
 
   return (
-    <div style={{display:'flex',flexDirection:'column',height:'calc(100vh - 34px)',background:C.bg}}>
-      <style>{'@keyframes pulseMic{0%{box-shadow:0 0 0 0 rgba(107,31,42,.5)}70%{box-shadow:0 0 0 10px transparent}100%{box-shadow:0 0 0 0 transparent}}'}</style>
-      <Header title="Votre sommelier" subtitle="Répond en temps réel" onBack={()=>setView('home')}
-        right={collector.totalCards>0?<div style={{background:'rgba(107,31,42,.08)',border:'1px solid '+C.bord,borderRadius:50,padding:'4px 12px',fontSize:11,color:C.wine}}>🏆 {collector.totalCards}</div>:null}/>
-      <div style={{flex:1,overflowY:'auto',padding:'14px',display:'flex',flexDirection:'column',gap:10}}>
-        {msgs.map((m,i)=>(
-          <div key={i} style={{display:'flex',flexDirection:'column',alignItems:m.role==='user'?'flex-end':'flex-start'}}>
-            <div style={{maxWidth:'88%',background:m.role==='user'?C.wine:C.cream,color:m.role==='user'?'#fdf8f0':C.text,border:'1px solid '+C.bord,borderRadius:m.role==='user'?'15px 15px 3px 15px':'15px 15px 15px 3px',padding:'10px 14px',fontSize:13,lineHeight:1.6,whiteSpace:'pre-wrap'}}>
-              {m.role==='assistant'&&<span style={{fontSize:15,marginRight:5}}>🍷</span>}
-              {m.text}
-            </div>
-            {m.wines&&m.wines.length>0&&(
-              <div style={{maxWidth:'96%',marginTop:8,display:'flex',flexDirection:'column',gap:7}}>
-                {m.wines.map((w,wi)=>(
-                  <div key={w.id} style={{background:wi===2?'#fef9ed':C.cream,border:'1.5px solid '+(wi===2?C.bord2:C.bord),borderRadius:12,overflow:'hidden'}}>
-                    <div onClick={()=>setModal(w)} style={{padding:'10px 13px',cursor:'pointer'}}>
-                      <div style={{display:'flex',alignItems:'center',gap:9,marginBottom:5}}>
-                        <Bottle wine={w} h={44} label={false}/>
-                        <div style={{flex:1}}>
-                          <div style={{fontSize:9,color:C.light,fontWeight:600,textTransform:'uppercase',letterSpacing:'.04em'}}>{labels[wi]||''}</div>
-                          {surtitreVin(w) && <div style={{fontSize:9,color:C.gold2,fontWeight:600,letterSpacing:'.12em',textTransform:'uppercase'}}>{surtitreVin(w)}</div>}
-                          <div style={{...serif,fontSize:14,fontWeight:700,color:C.wine,lineHeight:1.2}}>{nomVin(w)}{w.millesime ? ' ' + w.millesime : ''}</div>
+    <div style={{display:'flex', flexDirection:'column', height:'calc(100vh - 34px)', background:I.bg, color:I.ink}}>
+      <style>{'@keyframes pulseIv{0%,100%{box-shadow:0 0 0 0 rgba(94,22,34,.35)}50%{box-shadow:0 0 0 10px rgba(94,22,34,0)}}@keyframes pointIv{0%,80%,100%{opacity:.25}40%{opacity:1}}'}</style>
+      <EnteteIvoire onBack={()=>setView('home')}
+        droite={collector.totalCards>0 ? <button onClick={()=>setView('collector')} style={{...sans, ...capsIv(10, I.wine, {letterSpacing:'.16em', fontWeight:600}), minHeight:44, padding:'0 14px', background:'transparent', border:'1px solid ' + I.bord, borderRadius:999, cursor:'pointer'}}>{'Ma cave · ' + collector.totalCards}</button> : null}/>
+
+      <div style={{flex:1, overflowY:'auto'}}>
+        <div style={{maxWidth:680, margin:'0 auto', padding:'28px 20px 20px', display:'flex', flexDirection:'column', gap:18}}>
+          <div style={{textAlign:'center', marginBottom:4}}>
+            <div style={capsIv(11, I.gold, {letterSpacing:'.3em', fontWeight:600, marginBottom:8})}>Conversation</div>
+            <div style={{...serif, fontSize:34, fontWeight:500, color:I.wine, lineHeight:1.05}}>Votre sommelier</div>
+          </div>
+
+          {msgs.map((m,i)=>(
+            <div key={i} style={{display:'flex', flexDirection:'column', alignItems:m.role==='user'?'flex-end':'flex-start'}}>
+              {m.role==='assistant' && <div style={capsIv(10, I.muted, {letterSpacing:'.2em', fontWeight:600, margin:'0 0 7px 4px'})}>Le sommelier</div>}
+              <div style={{...sans, maxWidth:'86%', background:m.role==='user'?I.wine:I.cream, color:m.role==='user'?I.bg:I.body, border:m.role==='user'?'none':'1px solid ' + I.bord, borderRadius:m.role==='user'?'20px 20px 6px 20px':'6px 20px 20px 20px', padding:'14px 18px', fontSize:16, lineHeight:1.65, whiteSpace:'pre-wrap'}}>
+                {m.text}
+              </div>
+
+              {m.wines && m.wines.length>0 && (
+                <div style={{width:'100%', marginTop:12, display:'flex', flexDirection:'column', gap:10}}>
+                  {m.wines.map((w,wi)=>(
+                    <div key={w.id} style={{background:I.cream, border:'1px solid ' + I.bord, borderRadius:18, overflow:'hidden'}}>
+                      <div onClick={()=>setModal(w)} style={{display:'flex', gap:16, alignItems:'center', padding:'16px 18px', cursor:'pointer'}}>
+                        <div style={{width:56, flexShrink:0, display:'flex', justifyContent:'center'}}><PhotoVin wine={w} h={78}/></div>
+                        <div style={{flex:1, minWidth:0}}>
+                          <div style={capsIv(10, I.gold, {letterSpacing:'.18em', fontWeight:600, marginBottom:5})}>{labels[wi]||''}</div>
+                          {surtitreVin(w) && <div style={capsIv(10, I.muted, {letterSpacing:'.14em', marginBottom:2})}>{surtitreVin(w)}</div>}
+                          <div style={{...serif, fontSize:22, fontWeight:600, color:I.ink, lineHeight:1.15}}>{nomVin(w)}{w.millesime && !detailsVin(w).includes(String(w.millesime)) ? ' ' + w.millesime : ''}</div>
+                          <div style={{...sans, fontSize:13, color:I.muted, marginTop:4, lineHeight:1.5}}>{detailsVin(w)}</div>
                         </div>
-                        <div style={{textAlign:'right',flexShrink:0}}>
-                          <div style={{...serif,fontSize:17,fontWeight:700,color:C.wine}}>{w.price}€</div>
-                        </div>
+                        <div style={{...serif, fontSize:26, fontWeight:600, color:I.wine, flexShrink:0}}>{w.price + ' €'}</div>
                       </div>
-                      <div style={{display:'flex',gap:4,flexWrap:'wrap'}}>
-                        {[w.region,w.grape,'Stock: '+w.stock].map(tag=><span key={tag} style={{fontSize:9,background:'rgba(107,31,42,.07)',color:C.wine,padding:'2px 7px',borderRadius:50}}>{tag}</span>)}
+                      <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', gap:12, flexWrap:'wrap', padding:'12px 18px', borderTop:'1px solid ' + I.bord, background:I.bg}}>
+                        <EmplacementVin wine={w}/>
+                        <button onClick={()=>handleCollect(w)}
+                          style={{...sans, minHeight:44, padding:'0 18px', background:enCave(w)?I.soft:'transparent', border:'1px solid ' + (enCave(w)?I.bord2:I.wine), borderRadius:999, color:I.wine, fontSize:13, fontWeight:500, cursor:'pointer', whiteSpace:'nowrap'}}>
+                          {added===w.id ? '✓ Ajouté à ma cave' : enCave(w) ? '✓ Dans ma cave' : 'Garder dans ma cave'}
+                        </button>
                       </div>
                     </div>
-                    <button onClick={()=>handleCollect(w)} style={{width:'100%',background:added===w.id?'linear-gradient(135deg,'+C.gold+','+C.gold2+')':'rgba(107,31,42,.04)',color:added===w.id?'#2d0c13':C.wine,border:'none',borderTop:'1px solid '+C.bord,padding:'7px',fontSize:10,fontWeight:600,cursor:'pointer',fontFamily:'Montserrat,sans-serif',transition:'all .2s'}}>
-                      {added===w.id?'✓ Ajouté à votre collection !':'🏆 Collecter cette carte'}
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        ))}
-        {loading&&<div style={{alignSelf:'flex-start',background:C.cream,border:'1px solid '+C.bord,borderRadius:'15px 15px 15px 3px',padding:'10px 14px',fontSize:13,color:C.muted}}>Le sommelier réfléchit…</div>}
-        <div ref={bottomRef}/>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+
+          {msgs.length===1 && !loading && (
+            <div style={{display:'flex', flexWrap:'wrap', gap:10, marginTop:2}}>
+              {suggestions.map(s=>(
+                <button key={s} onClick={()=>send(s)}
+                  style={{...sans, minHeight:48, padding:'0 18px', background:'transparent', border:'1px solid ' + I.bord2, borderRadius:999, color:I.ink, fontSize:14, cursor:'pointer'}}>{s}</button>
+              ))}
+            </div>
+          )}
+
+          {loading && (
+            <div style={{alignSelf:'flex-start', display:'flex', alignItems:'center', gap:10, padding:'4px 4px'}}>
+              <span style={{display:'flex', gap:5}}>
+                {[0,1,2].map(k=><span key={k} style={{width:7, height:7, borderRadius:'50%', background:I.wine, animation:'pointIv 1.4s ease-in-out ' + (k*0.2) + 's infinite'}}/>)}
+              </span>
+              <span style={{...serif, fontStyle:'italic', fontSize:18, color:I.muted}}>Le sommelier réfléchit…</span>
+            </div>
+          )}
+          <div ref={bottomRef}/>
+        </div>
       </div>
-      {(mic==='listening'||mic==='speaking')&&(
-        <div style={{textAlign:'center',fontSize:12,padding:'4px 12px',color:mic==='speaking'?C.light:C.wine,flexShrink:0,background:C.bg2,borderTop:'1px solid '+C.bord}}>
+
+      {(mic==='listening'||mic==='speaking') && (
+        <div style={{...sans, textAlign:'center', fontSize:14, padding:'10px 16px', color:I.wine, flexShrink:0, background:I.soft, borderTop:'1px solid ' + I.bord}}>
           {mic==='listening'
-            ? <span>🎙 <b>{transcript||"Parlez... appuyez à nouveau pour envoyer"}</b></span>
-            : <span>🔊 Le sommelier parle… <button onClick={()=>{speechSynthesis.cancel();}} style={{marginLeft:8,background:'none',border:'1px solid '+C.bord2,borderRadius:50,padding:'1px 8px',fontSize:10,cursor:'pointer',color:C.wine}}>Arrêter</button></span>
-          }
+            ? <span>{transcript ? <b style={{fontWeight:600}}>{transcript}</b> : 'Parlez… touchez à nouveau le micro pour envoyer'}</span>
+            : <span>Le sommelier parle… <button onClick={()=>{speechSynthesis.cancel();}} style={{...sans, marginLeft:10, minHeight:36, background:'transparent', border:'1px solid ' + I.bord2, borderRadius:999, padding:'0 14px', fontSize:12, cursor:'pointer', color:I.wine}}>Arrêter</button></span>}
         </div>
       )}
-      <div style={{display:'flex',gap:8,padding:'10px 13px',borderTop:'1px solid '+C.bord,background:C.cream,flexShrink:0,alignItems:'center'}}>
-        <button onClick={toggle} style={{width:40,height:40,borderRadius:'50%',border:'none',fontSize:18,cursor:'pointer',flexShrink:0,animation:mic==='listening'?'pulseMic 1.2s infinite':'none',...(micColors[mic]||micColors.off)}}>{micIcons[mic]||'🎙'}</button>
-        <input style={{flex:1,background:C.bg,border:'1px solid '+C.bord,color:C.text,borderRadius:10,padding:'9px 13px',fontSize:13,outline:'none',fontFamily:'Montserrat,sans-serif'}} value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>e.key==='Enter'&&send()} placeholder="Écrivez ou parlez au sommelier…"/>
-        <button onClick={()=>send()} disabled={loading} style={{background:C.wine,color:'#fdf8f0',border:'none',borderRadius:50,padding:'9px 18px',cursor:'pointer',fontFamily:'Montserrat,sans-serif',fontSize:13,flexShrink:0}}>Envoyer</button>
+
+      <div style={{flexShrink:0, borderTop:'1px solid ' + I.bord, background:I.cream}}>
+        <div style={{maxWidth:680, margin:'0 auto', display:'flex', gap:10, padding:'14px 20px', alignItems:'center'}}>
+          <button onClick={toggle} aria-label={mic==='listening' ? 'Envoyer la dictée' : 'Parler au sommelier'}
+            style={{width:54, height:54, borderRadius:'50%', border:'1px solid ' + (mic==='off' ? I.bord2 : I.wine), cursor:'pointer', flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center', background:mic==='listening' ? I.wine : mic==='speaking' ? I.soft : I.cream, color:mic==='listening' ? I.bg : I.wine, animation:mic==='listening' ? 'pulseIv 1.6s ease-in-out infinite' : 'none'}}>
+            {mic==='listening' ? <IconeValider/> : mic==='speaking' ? <IconeSon/> : <IconeMicro/>}
+          </button>
+          <input value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>e.key==='Enter'&&send()} placeholder="Écrivez ou parlez au sommelier…"
+            style={{...sans, flex:1, minWidth:0, minHeight:54, background:I.bg, border:'1px solid ' + I.bord2, color:I.ink, borderRadius:999, padding:'0 20px', fontSize:16, outline:'none'}}/>
+          <button onClick={()=>send()} disabled={!peutEnvoyer} aria-label="Envoyer"
+            style={{width:54, height:54, borderRadius:'50%', border:'none', flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center', background:peutEnvoyer ? I.wine : I.bord, color:I.bg, cursor:peutEnvoyer ? 'pointer' : 'default', transition:'background .3s'}}>
+            <IconeEnvoyer/>
+          </button>
+        </div>
       </div>
       {modal&&<WineModal wine={modal} onClose={()=>setModal(null)} onCollect={()=>{handleCollect(modal);setModal(null);}}/>}
     </div>
