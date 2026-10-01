@@ -1,7 +1,7 @@
 'use strict';
 
 // ═══════════════════════════════════════════════════════════════════════════
-//  ACCORDS.JS — moteur d'accords mets-vins de Gabriel
+//  ACCORDS.JS — moteur d'accords mets-vins du sommelier
 //
 //  1. analyserPlat()  : l'IA décrit ce que le plat DEMANDE (corps, gras,
 //                       sauce, acidité, sucre, épices...). Elle ne choisit
@@ -279,7 +279,7 @@ function choisirDecouverte(notes, d, aleatoire) {
     n.score >= meilleur - REGLAGES.decouverteEcartMax) || null;
 }
 
-// ── Description courte d'un profil (pour le prompt de Gabriel) ──────────────
+// ── Description courte d'un profil (pour le prompt du sommelier) ──────────────
 const AXES_PROMPT = {
   rouge: ['corps', 'tanins', 'fraicheur', 'fruit', 'boise'],
   blanc: ['corps', 'texture', 'fraicheur', 'aromatique', 'mineralite', 'boise'],
@@ -322,7 +322,7 @@ function decrirePlat(d) {
   return bits.join(', ');
 }
 
-// ── 4. Candidats envoyés à Gabriel ──────────────────────────────────────────
+// ── 4. Candidats envoyés au sommelier ──────────────────────────────────────────
 // Même escalier de prix que l'ancien système (🥇 ≈ 80 % du max, ⭐ ≈ 100 %,
 // ✨ ≈ 120 %, ou 80/90/100 % si plafond strict), mais les vins sont retenus
 // et classés selon leur note d'accord avec le plat, plus selon une étiquette.
@@ -331,7 +331,7 @@ const PREMIUM = /peu importe le prix|grande occasion|grand cru|prestige|meilleur
 // Vivier de candidats : jamais de vin mal accordé pour « compléter » une liste trop courte.
 //   - au moins 6 vins compatibles (≥ seuilCompatible) → on garde ceux-là ;
 //   - sinon les vins acceptables (≥ seuilAcceptable), s'il y en a au moins 3 ;
-//   - sinon, faute de mieux, les 3 meilleurs (Gabriel dira que l'accord est imparfait).
+//   - sinon, faute de mieux, les 3 meilleurs (le sommelier dira que l'accord est imparfait).
 // couleurGardee : couleur imposée par le client en situation de compromis ; ses vins
 // (qui ont déjà passé les interdits) sont toujours gardés, en tête de liste.
 function vivier(lst, couleurGardee) {
@@ -397,7 +397,7 @@ function construireCandidats(wines, d, budget, featuredSet, texteClient, aleatoi
   // Couleur imposée par le client mais (presque) rien d'acceptable dans cette couleur pour
   // ce plat (ex. rouge sur fruits de mer) : on garde les rares vins de sa couleur qui passent
   // les interdits (rouges légers à servir frais) et on ajoute les meilleurs accords des
-  // autres couleurs, présentés comme alternatives. Avant, la liste revenait vide et Gabriel
+  // autres couleurs, présentés comme alternatives. Avant, la liste revenait vide et le sommelier
   // piochait dans tout le catalogue (Pomerol, Châteauneuf...).
   let compromis = null;
   if (d.couleur_demandee && notes.filter(n => n.score >= REGLAGES.seuilAcceptable).length < 3) {
@@ -447,7 +447,7 @@ function construireCandidats(wines, d, budget, featuredSet, texteClient, aleatoi
     tierWines._tiers = tiers;
   } else if (budget) {
     // Compromis couleur : peu de vins conviennent, à des prix épars. Pas de paliers de prix
-    // imposés (Gabriel « ajustait » les prix pour les y faire entrer) : liste libre dans le budget.
+    // imposés (le sommelier « ajustait » les prix pour les y faire entrer) : liste libre dans le budget.
     const ceiling = budget.max * (budget.strict ? 1.0 : 1.05);
     const dansBande = (n, lo) => n.wine.price >= lo && n.wine.price <= ceiling;
     fenetre = notes.filter(n => dansBande(n, budget.min * 0.95));
@@ -460,7 +460,7 @@ function construireCandidats(wines, d, budget, featuredSet, texteClient, aleatoi
     available = compatibles(fenetre).slice(0, 15).map(n => n.wine);
   }
 
-  // Rien d'utilisable dans le budget : jamais de liste vide (sinon Gabriel pioche dans
+  // Rien d'utilisable dans le budget : jamais de liste vide (sinon le sommelier pioche dans
   // tout le catalogue, sans filtre d'accord) → les mieux accordés, prix annoncés.
   let horsBudget = false;
   if (!available.length) {
@@ -489,7 +489,7 @@ function construireCandidats(wines, d, budget, featuredSet, texteClient, aleatoi
   return { tierWines, available, decouverte, notes: parId, compromis, horsBudget };
 }
 
-// Ligne d'un candidat dans le prompt de Gabriel
+// Ligne d'un candidat dans le prompt du sommelier
 function ligneCandidat(w, note, featuredSet, decouverte) {
   const raisons = note ? note.plus.slice(0, 3).join(' ; ') : '';
   return '\n  ID:' + w.id + ' | ' + (w.libelle || w.name) + ' | ' + w.type + ' | ' + w.price + '€ | ' + (w.region || '') +
@@ -1067,7 +1067,7 @@ async function preparerSommelier(env) {
 
 // ── Parcours guidé « Je cherche un vin pour… » ────────────────────────────────
 // Occasion (apéritif, repas, offrir, cuisiner) → vins notés par le moteur
-// d'accords → Gabriel choisit 3 vins parmi les mieux notés et leur attribue un
+// d'accords → le sommelier choisit 3 vins parmi les mieux notés et leur attribue un
 // rôle (valeur sûre, coup de cœur, découverte), avec une raison courte.
 const OCCASIONS = ['aperitif', 'repas', 'offrir', 'cuisiner'];
 
@@ -1180,7 +1180,7 @@ async function selectionGuidee(body, bracket, featuredSet, res, env) {
   });
   if (candidates.length < 3) return res.json({ ids: fallbackIds, roles: fallbackRoles, reasons: fallbackReasons, message: messageInfo });
 
-  const system = 'Tu es Gabriel, sommelier d\'une borne de supermarché. Ton sobre, pédagogique et factuel : ' +
+  const system = 'Tu es le sommelier de la borne WineSelect, dans un magasin (sans prénom). Ton sobre, pédagogique et factuel : ' +
     'tu n\'incites jamais à consommer davantage et ne présentes jamais l\'alcool comme festif.\n' +
     contexte + '\n' +
     (demande.couleur ? 'Le client a choisi : ' + demande.couleur + '.\n' : '') +

@@ -2,12 +2,12 @@
 <html lang="fr"><head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Wine Select</title>
+<title>WineSelect</title>
 <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Montserrat:wght@400;500;600;700&display=swap" rel="stylesheet">
-<style>*{box-sizing:border-box;margin:0;padding:0}body{background:#f4ebda}</style>
+<style>*{box-sizing:border-box;margin:0;padding:0}body{background:#faf6ee}</style>
 </head>
 <body>
 
@@ -157,6 +157,37 @@ function AdminGate({ children, setView }) {
 }
 const serif = {fontFamily:"'Cormorant Garamond',serif"};
 
+// ── Palette « Ivoire épuré » (direction graphique retenue, octobre 2026) ─────
+// C_IVOIRE reprend les mêmes clés que C : un écran passe en ivoire en déclarant
+// simplement « const C = C_IVOIRE; » au début de son composant.
+const C_IVOIRE = {
+  wine:'#5e1622', wine2:'#7d1f2e',
+  gold:'#8a6a2e', gold2:'#8a6a2e', goldLight:'#c9b99f',
+  cream:'#ffffff', bg:'#faf6ee', bg2:'#faf6ee',
+  text:'#2a1215', muted:'#6e5a50', light:'#8a6a2e',
+  bord:'#e6dccb', bord2:'#c9b99f',
+  cardBg:'#ffffff',
+  soft:'#f3ece0', ink:'#2a1215', body:'#4d3a35',
+};
+// Petites capitales espacées (libellés)
+const capsIv = (size, color, extra) => Object.assign({fontSize:size, letterSpacing:'.18em', textTransform:'uppercase', color:color}, extra || {});
+// En-tête commun des écrans ivoire : bouton Retour, signature, élément à droite
+function EnteteIvoire({onBack, droite}) {
+  const I = C_IVOIRE;
+  return (
+    <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', padding:'22px 24px 18px', borderBottom:'1px solid ' + I.bord}}>
+      {onBack ? (
+        <button onClick={onBack} style={{display:'flex', alignItems:'center', gap:8, minHeight:46, padding:'0 18px 0 12px', background:'transparent', border:'1px solid ' + I.bord2, borderRadius:999, color:I.ink, fontSize:13, letterSpacing:'.04em', cursor:'pointer', fontFamily:'Montserrat,sans-serif'}}>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>
+          Retour
+        </button>
+      ) : <div style={{width:96}}/>}
+      <div style={{...serif, fontSize:22, fontWeight:600, color:I.wine, letterSpacing:'.02em'}}>WineSelect</div>
+      <div style={{minWidth:96, display:'flex', justifyContent:'flex-end'}}>{droite || null}</div>
+    </div>
+  );
+}
+
 // ── Icônes vectorielles (remplacent les emojis) ──
 const PAIRING_COLORS = {
   viande:'#B33A3A', charcuterie:'#8B5A3C', barbecue:'#C1652C',
@@ -237,7 +268,7 @@ function PairingIcon({id, color, size=24}){
 }
 
 // Rôles sémantiques attribués par vin (pas par position) — cf. /selection-accord.
-// "valeur_sure"/"coup_de_coeur"/"decouverte" viennent du raisonnement de Gabriel
+// "valeur_sure"/"coup_de_coeur"/"decouverte" viennent du raisonnement du sommelier
 // (ou de l'heuristique de repli locale), jamais du simple rang de prix.
 const ROLE_LABELS = {
   valeur_sure:   'Valeur sûre',
@@ -730,7 +761,7 @@ function useMic(onResult) {
 }
 
 // ── API ───────────────────────────────────────────────────────────────────────
-const SYS_PROMPT = `Tu es Gabriel, sommelier dans une borne de supermarché. Tu parles simplement, sur un ton pédagogique et factuel : tu décris l'origine, le cépage, le terroir, l'élaboration et les accords mets-vins. Tu n'incites JAMAIS à consommer davantage, tu ne présentes jamais l'alcool comme festif, valorisant ou lié à la réussite, et tu peux rappeler que l'abus d'alcool est dangereux pour la santé.
+const SYS_PROMPT = `Tu es le sommelier de la borne WineSelect, dans un magasin. Tu ne te donnes pas de prénom. Tu parles simplement, sur un ton pédagogique et factuel : tu décris l'origine, le cépage, le terroir, l'élaboration et les accords mets-vins. Tu n'incites JAMAIS à consommer davantage, tu ne présentes jamais l'alcool comme festif, valorisant ou lié à la réussite, et tu peux rappeler que l'abus d'alcool est dangereux pour la santé.
 
 BUDGET — RÈGLE ABSOLUE : tu restes TOUJOURS dans la fourchette du client, tu ne la dépasses jamais.
 Les 3 prix montent du bas vers le haut de sa fourchette. Exemple : "entre 30 et 50€" → 🥇 ~35€, ⭐ ~42€, ✨ ~50€, et aucun vin au-dessus de 52,50€.
@@ -763,7 +794,7 @@ RÈGLES :
 
 CATALOGUE (${CATALOG.length} vins) : ${JSON.stringify(CATALOG)}`;
 
-async function askGabriel(history, system) {
+async function askSommelier(history, system) {
   try {
     const res = await fetch('http://localhost:3000/sommelier', {
       method:'POST', headers:{'Content-Type':'application/json'},
@@ -1029,110 +1060,88 @@ function WineModal({wine, onClose, onCollect}) {
 
 // ── HOME ──────────────────────────────────────────────────────────────────────
 function Home({setView, collector, customerApi}) {
-  const Diamond = ({s=5, c=C.gold}) => <span style={{display:'inline-block', width:s, height:s, transform:'rotate(45deg)', background:c}}/>;
+  // Accueil en direction « Ivoire épuré » : signature typographique (plus de
+  // bouteille dessinée en guise de logo), une action principale, deux secondaires.
+  const C = C_IVOIRE;
+  const client = customerApi && customerApi.customer;
+  const boutonHaut = {display:'flex', alignItems:'center', gap:8, minHeight:44, padding:'0 16px', background:'transparent', border:'1px solid ' + C.bord, borderRadius:999, color:C.body, cursor:'pointer', fontFamily:'Montserrat,sans-serif', ...capsIv(11, C.body, {letterSpacing:'.14em', fontWeight:500}), transition:'border-color .3s'};
+  const survol = (e, on) => { e.currentTarget.style.borderColor = on ? C.wine : C.bord; };
+  const IconeCarte = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M3 10h18M7 15h4"/></svg>;
+  const IconeClient = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="8.5" r="3.5"/><path d="M5 20c1.2-3.6 4-5.5 7-5.5s5.8 1.9 7 5.5"/></svg>;
+  const secondaires = [
+    {v:'chat', label:'Parler au sommelier', sub:'Décrivez votre plat, posez votre question',
+     icone: <svg width="28" height="28" viewBox="0 0 32 32" fill="none" stroke={C.wine} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 8.5C5 6.6 6.6 5 8.5 5h15C25.4 5 27 6.6 27 8.5v10c0 1.9-1.6 3.5-3.5 3.5H14l-6 5v-5h0.5C6.6 22 5 20.4 5 18.5z"/><path d="M11 12h10M11 16h6"/></svg>},
+    {v:'mystery', label:'Choix mystère', sub:'Laissez-vous surprendre',
+     icone: <svg width="28" height="28" viewBox="0 0 32 32" fill="none" stroke={C.wine} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M16 4l2.6 6.4L25 13l-6.4 2.6L16 22l-2.6-6.4L7 13l6.4-2.6z"/><path d="M25 21l1 2.5 2.5 1-2.5 1-1 2.5-1-2.5-2.5-1 2.5-1z"/></svg>},
+  ];
+
   return (
-    <div style={{minHeight:'100vh', position:'relative', overflow:'hidden', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:'46px 24px', background:'radial-gradient(128% 92% at 50% -12%, #fcf6e8 0%, #f0e4cb 54%, #e5d4b4 100%)'}}>
-
-      {/* Vignette + cadre filet doré */}
-      <div style={{position:'absolute', inset:0, pointerEvents:'none', background:'radial-gradient(100% 72% at 50% 46%, transparent 52%, rgba(58,16,8,.11) 100%)'}}/>
-      <div style={{position:'absolute', inset:13, border:`1px solid rgba(176,141,79,.34)`, borderRadius:18, pointerEvents:'none'}}/>
-      <div style={{position:'absolute', inset:17, border:`1px solid rgba(176,141,79,.15)`, borderRadius:14, pointerEvents:'none'}}/>
-
-      {/* Logo */}
-      <div style={{textAlign:'center', marginBottom:28, position:'relative', zIndex:1}}>
-        <div style={{position:'relative', display:'inline-block', marginBottom:8}}>
-          <div style={{position:'absolute', left:'50%', bottom:-2, transform:'translateX(-50%)', width:160, height:34, background:'radial-gradient(ellipse at center, rgba(176,141,79,.30), transparent 70%)', pointerEvents:'none'}}/>
-          <div style={{filter:'drop-shadow(0 16px 26px rgba(42,10,6,.32))', animation:'float 4.2s ease-in-out infinite'}}>
-            <Bottle wine={{name:'Wine Select', region:'Sélection', type:'rouge', price:0, id:7}} h={134} label={false}/>
-          </div>
-        </div>
-        <div style={{fontSize:10, letterSpacing:'.36em', textTransform:'uppercase', color:C.gold, fontWeight:600, marginBottom:7}}>Cave &amp; Sélection</div>
-        <h1 style={{...serif, fontSize:'clamp(2.6rem,7vw,3.7rem)', color:C.wine, fontWeight:700, lineHeight:.92, letterSpacing:'-.02em', whiteSpace:'nowrap'}}>Wine Select</h1>
-        <div style={{display:'flex', alignItems:'center', justifyContent:'center', gap:10, margin:'13px auto 0'}}>
-          <span style={{width:48, height:1, background:`linear-gradient(90deg,transparent,${C.gold})`}}/>
-          <Diamond/>
-          <span style={{width:48, height:1, background:`linear-gradient(90deg,${C.gold},transparent)`}}/>
-        </div>
-        <p style={{fontSize:11, color:C.muted, letterSpacing:'.16em', textTransform:'uppercase', marginTop:11}}>Le sommelier de votre supermarché</p>
+    <div style={{minHeight:'100vh', background:C.bg, color:C.ink, display:'flex', flexDirection:'column', paddingBottom:96}}>
+      {/* Barre haute : carte client, administration */}
+      <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', padding:'22px 24px 0'}}>
+        <button onClick={()=>setView('login')} style={boutonHaut} onMouseEnter={e=>survol(e,true)} onMouseLeave={e=>survol(e,false)}>
+          {client ? <IconeClient/> : <IconeCarte/>}
+          <span>{client ? client.name : 'Carte client'}</span>
+        </button>
+        <button onClick={()=>setView('admin')} style={{...boutonHaut, border:'1px solid transparent', color:C.muted}} onMouseEnter={e=>survol(e,true)} onMouseLeave={e=>{e.currentTarget.style.borderColor='transparent';}}>Gérant</button>
       </div>
 
-      {/* CTA principal */}
-      <div
-        onClick={()=>setView('selection')}
-        style={{position:'relative', zIndex:1, width:'100%', maxWidth:392, borderRadius:17, padding:1.5, marginBottom:14, cursor:'pointer', background:`linear-gradient(160deg, rgba(176,141,79,.62), rgba(176,141,79,.10) 60%)`, boxShadow:'0 20px 44px rgba(42,10,6,.26)', transition:'transform .3s cubic-bezier(.4,0,.2,1)'}}
-        onMouseEnter={e=>{e.currentTarget.style.transform='translateY(-4px)';}}
-        onMouseLeave={e=>{e.currentTarget.style.transform='translateY(0)';}}
-      >
-        <div style={{borderRadius:16, padding:'24px 24px 21px', textAlign:'center', position:'relative', overflow:'hidden', background:'linear-gradient(165deg,#6a1626 0%,#4d111c 100%)'}}>
-          <div style={{position:'absolute', top:-50, left:'14%', width:64, height:230, transform:'rotate(20deg)', background:'linear-gradient(90deg,transparent,rgba(255,240,220,.07),transparent)', pointerEvents:'none'}}/>
-          <div style={{fontSize:10, letterSpacing:'.26em', textTransform:'uppercase', color:'rgba(216,189,132,.92)', fontWeight:600, marginBottom:11}}>Sélection guidée · 3 étapes</div>
-          <div style={{...serif, fontSize:25, fontWeight:700, color:'#fbf3e3', lineHeight:1.08, marginBottom:9}}>Trouver mon vin idéal</div>
-          <div style={{fontSize:12, color:'rgba(251,243,227,.6)', lineHeight:1.7, marginBottom:19}}>Type, budget, accord mets-vins —<br/>trois questions, une sélection sur mesure.</div>
-          <div style={{display:'inline-flex', alignItems:'center', gap:9, background:'rgba(216,189,132,.13)', border:'1px solid rgba(216,189,132,.44)', borderRadius:50, padding:'10px 26px', fontSize:13, color:'#e7cf9a', fontWeight:600, letterSpacing:'.05em'}}>
-            Commencer <span style={{fontSize:15}}>→</span>
-          </div>
+      {/* Signature */}
+      <div style={{textAlign:'center', padding:'clamp(48px,10vh,96px) 24px 0'}}>
+        <div style={capsIv(11, C.gold, {letterSpacing:'.34em', fontWeight:600, marginBottom:14})}>Cave &amp; Sélection</div>
+        <h1 style={{...serif, margin:0, fontSize:'clamp(3.4rem,11vw,5rem)', fontWeight:500, lineHeight:.95, letterSpacing:'-.02em', color:C.wine}}>WineSelect</h1>
+        <div style={{display:'flex', alignItems:'center', justifyContent:'center', gap:12, margin:'20px auto 0'}}>
+          <span style={{width:56, height:1, background:C.bord2}}/>
+          <span style={{width:6, height:6, transform:'rotate(45deg)', background:C.gold}}/>
+          <span style={{width:56, height:1, background:C.bord2}}/>
         </div>
+        <p style={{...serif, fontStyle:'italic', fontSize:22, color:C.body, margin:'18px 0 0'}}>Le sommelier de votre magasin</p>
       </div>
 
-      {/* 2 options secondaires */}
-      <div style={{width:'100%', maxWidth:392, display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:26, position:'relative', zIndex:1}}>
-        {[
-          {label:'Sommelier IA',  sub:'Posez votre question',   v:'chat'},
-          {label:'Choix Mystère', sub:'Laissez-vous surprendre', v:'mystery'},
-        ].map(item=>(
-          <div
-            key={item.v}
-            onClick={()=>setView(item.v)}
-            style={{background:'rgba(255,250,240,.66)', backdropFilter:'blur(6px)', border:`1px solid rgba(176,141,79,.34)`, borderRadius:14, padding:'17px 12px 15px', textAlign:'center', cursor:'pointer', boxShadow:'0 4px 16px rgba(94,22,34,.06)', transition:'all .25s cubic-bezier(.4,0,.2,1)'}}
-            onMouseEnter={e=>{e.currentTarget.style.borderColor='rgba(176,141,79,.7)';e.currentTarget.style.transform='translateY(-3px)';e.currentTarget.style.boxShadow='0 12px 26px rgba(94,22,34,.12)';e.currentTarget.style.background='rgba(255,251,243,.92)';}}
-            onMouseLeave={e=>{e.currentTarget.style.borderColor='rgba(176,141,79,.34)';e.currentTarget.style.transform='translateY(0)';e.currentTarget.style.boxShadow='0 4px 16px rgba(94,22,34,.06)';e.currentTarget.style.background='rgba(255,250,240,.66)';}}
-          >
-            <div style={{marginBottom:9}}><Diamond/></div>
-            <div style={{...serif, fontSize:16, color:C.wine, fontWeight:700, marginBottom:3, letterSpacing:'-.01em'}}>{item.label}</div>
-            <div style={{fontSize:10.5, color:C.muted, letterSpacing:'.04em'}}>{item.sub}</div>
+      {/* Action principale */}
+      <div style={{width:'100%', maxWidth:560, margin:'0 auto', padding:'clamp(36px,7vh,64px) 24px 0'}}>
+        <button onClick={()=>setView('selection')}
+          style={{width:'100%', textAlign:'left', display:'flex', alignItems:'center', gap:20, padding:'30px 28px', background:C.wine, border:'none', borderRadius:20, cursor:'pointer', boxShadow:'0 22px 48px rgba(94,22,34,.18)', fontFamily:'Montserrat,sans-serif', transition:'transform .4s ease'}}
+          onMouseEnter={e=>{e.currentTarget.style.transform='translateY(-2px)';}} onMouseLeave={e=>{e.currentTarget.style.transform='translateY(0)';}}>
+          <div style={{flex:1}}>
+            <div style={capsIv(11, '#d8bd84', {letterSpacing:'.24em', fontWeight:600, marginBottom:12})}>Sélection guidée</div>
+            <div style={{...serif, fontSize:'clamp(1.9rem,6vw,2.4rem)', fontWeight:500, color:C.bg, lineHeight:1.05, marginBottom:10}}>Trouver mon vin idéal</div>
+            <div style={{fontSize:14, color:'rgba(250,246,238,.75)', lineHeight:1.6}}>3 ou 4 questions, 3 vins choisis pour vous.</div>
           </div>
-        ))}
-      </div>
+          <div style={{flexShrink:0, width:56, height:56, borderRadius:'50%', border:'1px solid rgba(216,189,132,.6)', display:'flex', alignItems:'center', justifyContent:'center', color:'#d8bd84'}}>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+          </div>
+        </button>
 
-      {/* Fidélité */}
-      {collector.totalCards>0&&(
-        <div style={{display:'flex', alignItems:'center', gap:11, background:'rgba(255,250,240,.6)', border:`1px solid rgba(176,141,79,.32)`, borderRadius:50, padding:'8px 20px', marginBottom:16, backdropFilter:'blur(6px)', position:'relative', zIndex:1}}>
-          <Diamond c={C.wine}/>
-          <span style={{fontSize:12, color:C.muted}}>
-            <strong style={{color:C.wine}}>{collector.totalCards} carte{collector.totalCards>1?'s':''}</strong>
-            {' en cave'}
-          </span>
-          {collector.discount>0&&(
-            <span style={{background:`linear-gradient(135deg,${C.gold},${C.gold2})`, borderRadius:50, padding:'3px 11px', fontSize:11, fontWeight:700, color:'#2d0c13'}}>-{collector.discount}%</span>
+        {/* Deux entrées secondaires */}
+        <div style={{display:'grid', gridTemplateColumns:'repeat(2, minmax(0, 1fr))', gap:14, marginTop:14}}>
+          {secondaires.map(item => (
+            <button key={item.v} onClick={()=>setView(item.v)}
+              style={{textAlign:'left', display:'flex', flexDirection:'column', gap:12, padding:'22px 20px', minHeight:140, background:C.cream, border:'1px solid ' + C.bord, borderRadius:18, cursor:'pointer', fontFamily:'Montserrat,sans-serif', transition:'border-color .3s'}}
+              onMouseEnter={e=>survol(e,true)} onMouseLeave={e=>survol(e,false)}>
+              {item.icone}
+              <div>
+                <div style={{...serif, fontSize:22, fontWeight:600, color:C.ink, lineHeight:1.1, marginBottom:5}}>{item.label}</div>
+                <div style={{fontSize:13, color:C.muted, lineHeight:1.5}}>{item.sub}</div>
+              </div>
+            </button>
+          ))}
+        </div>
+
+        {/* Ma collection */}
+        <div style={{display:'flex', alignItems:'center', justifyContent:'center', gap:14, marginTop:30, flexWrap:'wrap'}}>
+          <button onClick={()=>setView('collector')}
+            style={{minHeight:44, padding:'0 18px', background:'transparent', border:'none', cursor:'pointer', fontFamily:'Montserrat,sans-serif', ...capsIv(11, C.wine, {letterSpacing:'.18em', fontWeight:600}), textDecoration:'underline', textUnderlineOffset:6, textDecorationColor:C.bord2}}>
+            Ma collection
+          </button>
+          {collector.totalCards>0 && (
+            <span style={{fontSize:13, color:C.muted}}>
+              {collector.totalCards + ' vin' + (collector.totalCards>1?'s':'') + ' en cave'}
+              {collector.discount>0 ? ' · −' + collector.discount + ' %' : ''}
+            </span>
           )}
         </div>
-      )}
-
-      {/* Bouton collection discret */}
-      <button
-        onClick={()=>setView('collector')}
-        style={{background:'none', border:'none', color:'rgba(94,22,34,.45)', fontSize:11, cursor:'pointer', fontFamily:'Montserrat,sans-serif', letterSpacing:'.12em', textTransform:'uppercase', position:'relative', zIndex:1, transition:'color .2s'}}
-        onMouseEnter={e=>e.currentTarget.style.color='rgba(94,22,34,.8)'}
-        onMouseLeave={e=>e.currentTarget.style.color='rgba(94,22,34,.45)'}
-      >
-        Ma collection
-      </button>
-
-      {/* Carte client haut gauche */}
-      <button
-        onClick={()=>setView('login')}
-        style={{position:'absolute', top:24, left:26, zIndex:2, background:'rgba(255,250,240,.7)', border:`1px solid rgba(176,141,79,.4)`, color:C.wine, fontSize:10, fontWeight:600, letterSpacing:'.1em', textTransform:'uppercase', cursor:'pointer', fontFamily:'Montserrat,sans-serif', borderRadius:50, padding:'6px 14px', transition:'all .2s'}}
-        onMouseEnter={e=>{e.currentTarget.style.background='rgba(94,22,34,.07)';e.currentTarget.style.borderColor='rgba(176,141,79,.7)';}}
-        onMouseLeave={e=>{e.currentTarget.style.background='rgba(255,250,240,.7)';e.currentTarget.style.borderColor='rgba(176,141,79,.4)';}}
-      >{customerApi&&customerApi.customer ? '👤 '+customerApi.customer.name : '💳 Carte client'}</button>
-
-      {/* Admin bouton haut droite */}
-      <button
-        onClick={()=>setView('admin')}
-        style={{position:'absolute', top:24, right:26, zIndex:2, background:'rgba(255,250,240,.7)', border:`1px solid rgba(176,141,79,.4)`, color:C.wine, fontSize:10, fontWeight:600, letterSpacing:'.12em', textTransform:'uppercase', cursor:'pointer', fontFamily:'Montserrat,sans-serif', borderRadius:50, padding:'6px 14px', transition:'all .2s'}}
-        onMouseEnter={e=>{e.currentTarget.style.background='rgba(94,22,34,.07)';e.currentTarget.style.borderColor='rgba(176,141,79,.7)';}}
-        onMouseLeave={e=>{e.currentTarget.style.background='rgba(255,250,240,.7)';e.currentTarget.style.borderColor='rgba(176,141,79,.4)';}}
-      >Admin</button>
+      </div>
     </div>
   );
 }
@@ -1155,10 +1164,10 @@ const GOUTS_UI = [
   {id:'fruite_gourmand', label:'Fruité et gourmand', desc:'Rond, plein de fruit'},
   {id:'riche_intense',   label:'Riche et intense',   desc:'De la matière, du caractère'},
   {id:'doux',            label:'Doux',               desc:'Une touche sucrée'},
-  {id:'inconnu',         label:'Je ne sais pas',     desc:'Laissez Gabriel vous guider'},
+  {id:'inconnu',         label:'Je ne sais pas',     desc:'Le sommelier vous guide'},
 ];
 // Cadeau : « Je ne sais pas » formulé pour la personne qui reçoit
-const GOUTS_OFFRIR_INCONNU = {id:'inconnu', label:'Je ne connais pas ses goûts', desc:'Gabriel choisit une valeur sûre'};
+const GOUTS_OFFRIR_INCONNU = {id:'inconnu', label:'Je ne connais pas ses goûts', desc:'Le sommelier choisit une valeur sûre'};
 // Apéritif et cadeau : goûts propres à la couleur choisie (le moteur d'accords les connaît sous ces id)
 const GOUTS_PAR_COULEUR = {
   rouge: [
@@ -1219,6 +1228,7 @@ function OccasionIcon({id, size=30, color}) {
 }
 
 function Selection({setView, setResults}) {
+  const C = C_IVOIRE;   // écran en direction « Ivoire épuré »
   const [screen,   setScreen]   = useState('occasion');
   const [hist,     setHist]     = useState([]);
   const [occasion, setOccasion] = useState(null);
@@ -1358,21 +1368,22 @@ function Selection({setView, setResults}) {
   };
 
   // ── Éléments d'interface ─────────────────────────────────────────────────
-  const titre = t => <h2 style={{...serif, fontSize:'clamp(1.5rem,4vw,2rem)', color:C.wine, textAlign:'center', marginBottom:20}}>{t}</h2>;
-  const hover = (e, on) => { e.currentTarget.style.borderColor = on ? C.gold : C.bord; e.currentTarget.style.transform = on ? 'translateY(-2px)' : 'translateY(0)'; };
+  const titre = t => <h2 style={{...serif, fontSize:'clamp(1.9rem,5vw,2.5rem)', fontWeight:500, lineHeight:1.08, letterSpacing:'-.01em', color:C.ink, textAlign:'center', margin:'6px 0 26px'}}>{t}</h2>;
+  const hover = (e, on) => { e.currentTarget.style.borderColor = on ? C.wine : C.bord; };
   const Carte = ({label, desc, onClick, icon, accent}) => (
     <div onClick={onClick} onMouseEnter={e => hover(e, true)} onMouseLeave={e => hover(e, false)}
-      style={{background:accent ? '#fef9ed' : C.cream, border:'1.5px solid ' + (accent ? C.bord2 : C.bord), borderRadius:14, padding:'15px 16px', cursor:'pointer', transition:'all .2s', display:'flex', alignItems:'center', gap:13, boxShadow:'0 2px 8px rgba(107,31,42,.05)'}}>
+      style={{background:accent ? C.soft : C.cream, border:'1px solid ' + C.bord, borderRadius:16, padding:'18px 20px', minHeight:72, cursor:'pointer', transition:'border-color .3s', display:'flex', alignItems:'center', gap:16}}>
       {icon && <div style={{flexShrink:0, display:'flex'}}>{icon}</div>}
       <div style={{flex:1, textAlign:'left'}}>
-        <div style={{...serif, fontSize:18, fontWeight:700, color:C.wine, lineHeight:1.2}}>{label}</div>
-        {desc && <div style={{fontSize:12, color:C.muted, marginTop:2}}>{desc}</div>}
+        <div style={{...serif, fontSize:21, fontWeight:600, color:C.ink, lineHeight:1.2}}>{label}</div>
+        {desc && <div style={{fontSize:13, color:C.muted, marginTop:3}}>{desc}</div>}
       </div>
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={C.bord2} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{flexShrink:0}}><path d="M9 5l7 7-7 7"/></svg>
     </div>
   );
   const BoutonLibre = ({label, onClick}) => (
-    <div onClick={onClick} onMouseEnter={e => e.currentTarget.style.borderColor = C.gold} onMouseLeave={e => e.currentTarget.style.borderColor = C.bord2}
-      style={{gridColumn:'1 / -1', marginTop:4, background:'transparent', border:'1.5px dashed ' + C.bord2, borderRadius:12, padding:'13px 10px', textAlign:'center', cursor:'pointer', color:C.wine, fontSize:14, ...serif, fontWeight:600, transition:'border-color .2s'}}>
+    <div onClick={onClick} onMouseEnter={e => e.currentTarget.style.borderColor = C.wine} onMouseLeave={e => e.currentTarget.style.borderColor = C.bord2}
+      style={{gridColumn:'1 / -1', marginTop:6, background:'transparent', border:'1px dashed ' + C.bord2, borderRadius:14, padding:'16px 10px', minHeight:56, textAlign:'center', cursor:'pointer', color:C.wine, fontSize:17, ...serif, fontWeight:600, transition:'border-color .3s'}}>
       {label}
     </div>
   );
@@ -1385,14 +1396,16 @@ function Selection({setView, setResults}) {
   const platsOpts = PAIRINGS.filter(p => p.id !== 'apéritif');
 
   return (
-    <div style={{minHeight:'100vh', background:C.bg}}>
-      <Header title="Sélection guidée" subtitle={'Étape ' + Math.min(step, total) + '/' + total + ' — ' + (LABEL[screen] || '')}
-        onBack={back}
-        right={<div style={{background:'rgba(107,31,42,.08)', border:'1px solid ' + C.bord, borderRadius:50, padding:'4px 12px', fontSize:12, color:C.wine}}>{count} vins</div>}/>
-      <div style={{background:C.bg2, padding:'0 18px 12px', display:'flex', gap:4}}>
-        {Array.from({length: total}, (_, i) => i + 1).map(i => <div key={i} style={{flex:1, height:3, borderRadius:2, background: step >= i ? C.gold : 'rgba(107,31,42,.15)', transition:'background .3s'}}/>)}
+    <div style={{minHeight:'100vh', background:C.bg, color:C.ink, paddingBottom:96}}>
+      <EnteteIvoire onBack={screen === 'thinking' ? null : back}
+        droite={screen !== 'thinking' && (couleur || budget) ? <span style={capsIv(10, C.muted, {letterSpacing:'.14em'})}>{count + ' vins'}</span> : null}/>
+      <div style={{padding:'18px 24px 0', maxWidth:560, margin:'0 auto'}}>
+        <div style={capsIv(11, C.gold, {letterSpacing:'.22em', textAlign:'center', marginBottom:10})}>{'Étape ' + Math.min(step, total) + ' sur ' + total + ' · ' + (LABEL[screen] || '')}</div>
+        <div style={{display:'flex', gap:6}}>
+          {Array.from({length: total}, (_, i) => i + 1).map(i => <div key={i} style={{flex:1, height:2, borderRadius:2, background: step >= i ? C.wine : C.bord, transition:'background .5s'}}/>)}
+        </div>
       </div>
-      <div style={{maxWidth:520, margin:'0 auto', padding:'20px 16px'}}>
+      <div style={{maxWidth:560, margin:'0 auto', padding:'28px 24px'}}>
 
         {screen === 'occasion' && (
           <div>
@@ -1418,13 +1431,13 @@ function Selection({setView, setResults}) {
         {screen === 'plat' && (
           <div>
             {titre("Qu'allez-vous manger ?")}
-            <div style={{display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:9}}>
+            <div style={{display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:10}}>
               {platsOpts.map(p => (
-                <div key={p.id} onClick={() => pickPairing(p.id)} style={{background:PAIRING_BG[p.id] || C.cream, border:'1.5px solid ' + C.bord, borderRadius:12, padding:'12px 6px', textAlign:'center', cursor:'pointer', transition:'all .2s'}}
-                  onMouseEnter={e => { e.currentTarget.style.borderColor = PAIRING_COLORS[p.id] || C.gold; e.currentTarget.style.transform = 'scale(1.04)'; }}
-                  onMouseLeave={e => { e.currentTarget.style.borderColor = C.bord; e.currentTarget.style.transform = 'scale(1)'; }}>
-                  <div style={{marginBottom:4, display:'flex', justifyContent:'center'}}><PairingIcon id={p.id} size={24}/></div>
-                  <div style={{...serif, fontSize:12, color:C.wine}}>{p.label}</div>
+                <div key={p.id} onClick={() => pickPairing(p.id)} style={{background:C.cream, border:'1px solid ' + C.bord, borderRadius:14, padding:'18px 6px 16px', minHeight:96, textAlign:'center', cursor:'pointer', transition:'border-color .3s', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:8}}
+                  onMouseEnter={e => { e.currentTarget.style.borderColor = PAIRING_COLORS[p.id] || C.wine; }}
+                  onMouseLeave={e => { e.currentTarget.style.borderColor = C.bord; }}>
+                  <PairingIcon id={p.id} size={30}/>
+                  <div style={{...serif, fontSize:17, fontWeight:600, color:C.ink, lineHeight:1.15}}>{p.label}</div>
                 </div>
               ))}
               <BoutonLibre label="Un autre plat ? Dites-le" onClick={ouvrirLibre}/>
@@ -1435,18 +1448,18 @@ function Selection({setView, setResults}) {
         {screen === 'precision' && (
           <div>
             {titre('Comment est-il préparé ?')}
-            <div style={{textAlign:'center', fontSize:12, color:C.muted, marginTop:-12, marginBottom:18}}>Pour un accord plus juste — facultatif</div>
-            <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, maxWidth:440, margin:'0 auto'}}>
+            <div style={{textAlign:'center', fontSize:13, color:C.muted, marginTop:-16, marginBottom:22}}>Pour un accord plus juste — facultatif</div>
+            <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:10}}>
               {(PAIRING_DETAILS[pairing] || []).map(d => (
-                <div key={d.id} onClick={() => pickDetail(d)} style={{background:C.cream, border:'1.5px solid ' + C.bord, borderRadius:12, padding:'14px 10px', textAlign:'center', cursor:'pointer', transition:'all .2s'}}
-                  onMouseEnter={e => { e.currentTarget.style.borderColor = C.gold; e.currentTarget.style.transform = 'scale(1.03)'; }}
-                  onMouseLeave={e => { e.currentTarget.style.borderColor = C.bord; e.currentTarget.style.transform = 'scale(1)'; }}>
-                  <div style={{...serif, fontSize:14, color:C.wine}}>{d.label}</div>
+                <div key={d.id} onClick={() => pickDetail(d)} style={{background:C.cream, border:'1px solid ' + C.bord, borderRadius:14, padding:'18px 12px', minHeight:72, display:'flex', alignItems:'center', justifyContent:'center', textAlign:'center', cursor:'pointer', transition:'border-color .3s'}}
+                  onMouseEnter={e => { e.currentTarget.style.borderColor = C.wine; }}
+                  onMouseLeave={e => { e.currentTarget.style.borderColor = C.bord; }}>
+                  <div style={{...serif, fontSize:17, fontWeight:600, color:C.ink, lineHeight:1.2}}>{d.label}</div>
                 </div>
               ))}
-              <div onClick={() => pickDetail(null)} style={{gridColumn:'1 / -1', background:'transparent', border:'1.5px dashed ' + C.bord, borderRadius:12, padding:'12px 10px', textAlign:'center', cursor:'pointer', color:C.muted, fontSize:13}}
-                onMouseEnter={e => e.currentTarget.style.borderColor = C.gold} onMouseLeave={e => e.currentTarget.style.borderColor = C.bord}>
-                Peu importe, laissez Gabriel choisir
+              <div onClick={() => pickDetail(null)} style={{gridColumn:'1 / -1', marginTop:6, background:C.soft, border:'1px solid ' + C.bord, borderRadius:14, padding:'16px 10px', minHeight:56, textAlign:'center', cursor:'pointer', color:C.body, fontSize:14}}
+                onMouseEnter={e => e.currentTarget.style.borderColor = C.wine} onMouseLeave={e => e.currentTarget.style.borderColor = C.bord}>
+                Peu importe, conseillez-moi
               </div>
             </div>
           </div>
@@ -1455,12 +1468,12 @@ function Selection({setView, setResults}) {
         {screen === 'recette' && (
           <div>
             {titre('Quelle recette ?')}
-            <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, maxWidth:440, margin:'0 auto'}}>
+            <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:10}}>
               {RECETTES_UI.map(r => (
-                <div key={r.id} onClick={() => pickRecette(r.id)} style={{background:C.cream, border:'1.5px solid ' + C.bord, borderRadius:12, padding:'15px 10px', textAlign:'center', cursor:'pointer', transition:'all .2s'}}
-                  onMouseEnter={e => { e.currentTarget.style.borderColor = C.gold; e.currentTarget.style.transform = 'scale(1.03)'; }}
-                  onMouseLeave={e => { e.currentTarget.style.borderColor = C.bord; e.currentTarget.style.transform = 'scale(1)'; }}>
-                  <div style={{...serif, fontSize:15, color:C.wine, fontWeight:600}}>{r.label}</div>
+                <div key={r.id} onClick={() => pickRecette(r.id)} style={{background:C.cream, border:'1px solid ' + C.bord, borderRadius:14, padding:'18px 12px', minHeight:72, display:'flex', alignItems:'center', justifyContent:'center', textAlign:'center', cursor:'pointer', transition:'border-color .3s'}}
+                  onMouseEnter={e => { e.currentTarget.style.borderColor = C.wine; }}
+                  onMouseLeave={e => { e.currentTarget.style.borderColor = C.bord; }}>
+                  <div style={{...serif, fontSize:18, color:C.ink, fontWeight:600, lineHeight:1.2}}>{r.label}</div>
                 </div>
               ))}
               <BoutonLibre label="Une autre recette ? Dites-la" onClick={ouvrirLibre}/>
@@ -1469,32 +1482,38 @@ function Selection({setView, setResults}) {
         )}
 
         {screen === 'libre' && (
-          <div style={{maxWidth:440, margin:'0 auto'}}>
+          <div>
             {titre(occasion === 'cuisiner' ? 'Décrivez votre recette' : 'Décrivez votre plat')}
-            <div style={{background:C.cream, border:'1px solid ' + C.bord, borderRadius:15, padding:'18px 16px'}}>
-              <div style={{display:'flex', gap:8, alignItems:'center', marginBottom:12}}>
+            <div style={{background:C.cream, border:'1px solid ' + C.bord, borderRadius:18, padding:'22px 20px'}}>
+              <div style={{display:'flex', gap:10, alignItems:'center', marginBottom:14}}>
                 <input value={mic === 'listening' && transcript ? transcript : texte} onChange={e => setTexte(e.target.value)}
                   onKeyDown={e => e.key === 'Enter' && validerLibre()} autoFocus
                   placeholder={occasion === 'cuisiner' ? 'Ex. : blanquette, poires au vin…' : 'Ex. : hachis parmentier, poulet basquaise…'}
-                  style={{flex:1, background:C.bg, border:'1.5px solid ' + C.bord, color:C.text, borderRadius:10, padding:'13px 14px', fontSize:16, outline:'none', fontFamily:'Montserrat,sans-serif'}}/>
-                <button onClick={toggle} title="Dicter" style={{width:46, height:46, borderRadius:'50%', border:'none', fontSize:19, cursor:'pointer', flexShrink:0, background: mic === 'listening' ? C.wine : 'rgba(107,31,42,.1)', color: mic === 'listening' ? '#fdf8f0' : C.wine}}>{mic === 'listening' ? '✅' : '🎙'}</button>
+                  style={{flex:1, minWidth:0, background:C.bg, border:'1px solid ' + C.bord2, color:C.ink, borderRadius:12, padding:'15px 16px', fontSize:17, outline:'none', fontFamily:'Montserrat,sans-serif'}}/>
+                <button onClick={toggle} title={mic === 'listening' ? 'Terminer la dictée' : 'Dicter'} aria-label={mic === 'listening' ? 'Terminer la dictée' : 'Dicter'}
+                  style={{width:52, height:52, borderRadius:'50%', border:'1px solid ' + (mic === 'listening' ? C.wine : C.bord2), cursor:'pointer', flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center', background: mic === 'listening' ? C.wine : C.cream, color: mic === 'listening' ? C.bg : C.wine, animation: mic === 'listening' ? 'pulseIv 1.6s ease-in-out infinite' : 'none'}}>
+                  {mic === 'listening'
+                    ? <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>
+                    : <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></svg>}
+                </button>
               </div>
-              {mic === 'listening' && <div style={{fontSize:11, color:C.wine, marginBottom:10, textAlign:'center'}}>Parlez… appuyez à nouveau sur le micro pour terminer</div>}
-              <button onClick={validerLibre} disabled={!(texte || '').trim()} style={{width:'100%', background:(texte || '').trim() ? C.wine : 'rgba(107,31,42,.25)', color:'#fdf8f0', border:'none', borderRadius:50, padding:'12px', cursor:(texte || '').trim() ? 'pointer' : 'default', fontFamily:'Montserrat,sans-serif', fontSize:14, fontWeight:600}}>Valider</button>
+              {mic === 'listening' && <div style={{fontSize:13, color:C.wine, marginBottom:12, textAlign:'center'}}>Parlez… touchez à nouveau le micro pour terminer</div>}
+              <button onClick={validerLibre} disabled={!(texte || '').trim()} style={{width:'100%', minHeight:56, background:(texte || '').trim() ? C.wine : C.bord, color:C.bg, border:'none', borderRadius:999, cursor:(texte || '').trim() ? 'pointer' : 'default', fontFamily:'Montserrat,sans-serif', fontSize:15, fontWeight:600, letterSpacing:'.03em'}}>Valider</button>
             </div>
+            <style>{'@keyframes pulseIv{0%,100%{box-shadow:0 0 0 0 rgba(94,22,34,.35)}50%{box-shadow:0 0 0 10px rgba(94,22,34,0)}}'}</style>
           </div>
         )}
 
         {screen === 'budget' && (
           <div>
             {titre('Quel est votre budget ?')}
-            <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, maxWidth:420, margin:'0 auto'}}>
+            <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:12}}>
               {BUDGETS.map(b => (
-                <div key={b.id} onClick={() => pickBudget(b.id)} style={{background:budget === b.id ? '#fef9ed' : C.cream, border:'2px solid ' + (budget === b.id ? C.gold : C.bord), borderRadius:14, padding:17, textAlign:'center', cursor:'pointer', transition:'all .25s'}}
-                  onMouseEnter={e => e.currentTarget.style.borderColor = C.gold}
+                <div key={b.id} onClick={() => pickBudget(b.id)} style={{background:budget === b.id ? C.soft : C.cream, border:'1px solid ' + (budget === b.id ? C.wine : C.bord), borderRadius:16, padding:'22px 14px', minHeight:104, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', textAlign:'center', cursor:'pointer', transition:'border-color .3s'}}
+                  onMouseEnter={e => e.currentTarget.style.borderColor = C.wine}
                   onMouseLeave={e => { if (budget !== b.id) e.currentTarget.style.borderColor = C.bord; }}>
-                  <div style={{...serif, fontSize:19, fontWeight:700, color:budget === b.id ? C.light : C.wine, marginBottom:4}}>{b.label}</div>
-                  <div style={{fontSize:12, color:C.muted}}>{b.desc}</div>
+                  <div style={{...serif, fontSize:26, fontWeight:600, color:C.wine, marginBottom:6, lineHeight:1}}>{b.label}</div>
+                  <div style={capsIv(10, C.muted, {letterSpacing:'.14em'})}>{b.desc}</div>
                 </div>
               ))}
             </div>
@@ -1504,22 +1523,22 @@ function Selection({setView, setResults}) {
         {screen === 'couleur' && (
           <div>
             {titre(offrir ? 'Quel type de vin offrir ?' : apero ? 'Quel type de vin ?' : 'Avez-vous une préférence ?')}
-            <div style={{maxWidth:420, margin:'0 auto'}}>
+            <div>
               <div style={{marginBottom:12}}>
-                <Carte label={offrir ? 'Je ne sais pas, conseillez-moi' : 'Peu importe, conseillez-moi'} desc={offrir ? 'Gabriel choisit une valeur sûre, qui fait plaisir' : 'Gabriel choisit la couleur qui va le mieux'} accent={true} onClick={() => pickCouleur(null)}/>
+                <Carte label={offrir ? 'Je ne sais pas, conseillez-moi' : 'Peu importe, conseillez-moi'} desc={offrir ? 'Le sommelier choisit une valeur sûre, qui fait plaisir' : 'Le sommelier choisit la couleur qui va le mieux'} accent={true} onClick={() => pickCouleur(null)}/>
               </div>
               <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:12}}>
                 {TYPES.map(t => (
-                  <div key={t.id} onClick={() => pickCouleur(t.id)} style={{background:t.bg, border:'2px solid transparent', borderRadius:16, padding:'18px 14px', textAlign:'center', cursor:'pointer', transition:'all .25s', boxShadow:'0 2px 8px rgba(107,31,42,.05)'}}
-                    onMouseEnter={e => { e.currentTarget.style.borderColor = t.color; e.currentTarget.style.transform = 'translateY(-2px)'; }}
-                    onMouseLeave={e => { e.currentTarget.style.borderColor = 'transparent'; e.currentTarget.style.transform = 'translateY(0)'; }}>
-                    <div style={{marginBottom:6, display:'flex', justifyContent:'center'}}><TypeIcon id={t.id} color={t.color} size={34}/></div>
-                    <div style={{...serif, fontSize:18, color:C.wine, fontWeight:700}}>{t.label}</div>
+                  <div key={t.id} onClick={() => pickCouleur(t.id)} style={{background:C.cream, border:'1px solid ' + C.bord, borderRadius:16, padding:'20px 14px', minHeight:120, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', textAlign:'center', cursor:'pointer', transition:'border-color .3s'}}
+                    onMouseEnter={e => { e.currentTarget.style.borderColor = t.color; }}
+                    onMouseLeave={e => { e.currentTarget.style.borderColor = C.bord; }}>
+                    <div style={{marginBottom:8, display:'flex', justifyContent:'center'}}><TypeIcon id={t.id} color={t.color} size={38}/></div>
+                    <div style={{...serif, fontSize:22, color:C.ink, fontWeight:600}}>{t.label}</div>
                     {occasion === 'repas' && conseils && conseils[t.id] === 'conseille' && (
-                      <div style={{display:'inline-block', marginTop:6, background:C.gold, color:'#fdf8f0', borderRadius:50, padding:'3px 10px', fontSize:10, fontWeight:600, letterSpacing:'.04em'}}>Conseillé avec ce plat</div>
+                      <div style={{marginTop:8, background:C.wine, color:C.bg, borderRadius:999, padding:'4px 12px', ...capsIv(9, C.bg, {letterSpacing:'.12em', fontWeight:600})}}>Conseillé avec ce plat</div>
                     )}
                     {occasion === 'repas' && conseils && conseils[t.id] === 'compromis' && (
-                      <div style={{marginTop:6, color:C.muted, fontSize:11, fontStyle:'italic'}}>Accord moins évident</div>
+                      <div style={{marginTop:8, color:C.muted, fontSize:12, fontStyle:'italic'}}>Accord moins évident</div>
                     )}
                   </div>
                 ))}
@@ -1542,10 +1561,10 @@ function Selection({setView, setResults}) {
         )}
 
         {screen === 'thinking' && (
-          <div style={{textAlign:'center', padding:'50px 20px'}}>
-            <div style={{fontSize:42, marginBottom:14, animation:'pulse 1.4s ease-in-out infinite'}}>🍷</div>
-            <div style={{...serif, fontSize:18, color:C.wine}}>Gabriel choisit vos vins...</div>
-            <div style={{fontSize:12, color:C.muted, marginTop:6}}>
+          <div style={{textAlign:'center', padding:'70px 20px'}}>
+            <div style={{display:'flex', justifyContent:'center', marginBottom:22, animation:'pulse 2.2s ease-in-out infinite'}}><TypeIcon id="rouge" color={C.wine} size={56}/></div>
+            <div style={{...serif, fontSize:28, fontWeight:500, color:C.ink}}>Le sommelier choisit vos vins…</div>
+            <div style={{fontSize:14, color:C.muted, marginTop:10, lineHeight:1.6}}>
               {occasion === 'cuisiner' ? 'Il cherche le vin qui convient à votre recette'
                 : occasion === 'repas' ? 'Il compare cépages, régions et accords pour votre plat'
                 : 'Il compare les styles et les appellations selon vos goûts'}
@@ -1707,7 +1726,7 @@ function Mystery({setView, collector}) {
             <div style={{width:104,height:104,margin:'0 auto 18px',borderRadius:'50%',border:`1.5px solid ${C.bord2}`,display:'flex',alignItems:'center',justifyContent:'center',animation:'float 3s ease-in-out infinite',filter:'drop-shadow(0 8px 22px rgba(94,22,34,.18))',background:`radial-gradient(circle at 50% 36%,rgba(176,141,79,.16),transparent 70%)`}}><span style={{...serif,fontSize:52,color:C.wine,fontWeight:700}}>?</span></div>
             <h2 style={{...serif, fontSize:'clamp(1.8rem,5vw,2.6rem)', color:C.wine, marginBottom:10}}>Choix Mystère</h2>
             <div style={{width:40, height:1.5, background:'linear-gradient(90deg,transparent,'+C.gold+',transparent)', margin:'12px auto 14px'}}/>
-            <p style={{color:C.muted, marginBottom:28, lineHeight:1.7, fontSize:14}}>Laissez Gabriel vous surprendre avec un vin d'exception soigneusement sélectionné</p>
+            <p style={{color:C.muted, marginBottom:28, lineHeight:1.7, fontSize:14}}>Laissez le sommelier vous surprendre avec un vin d'exception soigneusement sélectionné</p>
             <button onClick={reveal} style={{background:'linear-gradient(135deg,'+C.wine+','+C.wine2+')',color:'#fdf8f0',border:'none',borderRadius:50,padding:'13px 30px',fontSize:15,fontWeight:600,cursor:'pointer',fontFamily:'Montserrat,sans-serif',boxShadow:'0 8px 24px rgba(107,31,42,.25)'}}>✨ Révéler le mystère</button>
           </>
         ) : (
@@ -1739,7 +1758,7 @@ function Mystery({setView, collector}) {
 // ── CHAT ──────────────────────────────────────────────────────────────────────
 function Chat({setView, collector, customer}) {
   // RGPD : aucun nom/identifiant client dans les messages (ils sont transmis à l'API IA)
-  const initMsg = {role:'assistant', text:(customer?"Bonjour, ravi de vous revoir ! 🍷":"Bonjour ! Je suis Gabriel, votre sommelier. 🍷")+"\n\nPosez-moi n'importe quelle question sur le vin — budget, accord, cépage, occasion...\nJe vous guide vers le vin parfait !", wines:[]};
+  const initMsg = {role:'assistant', text:(customer?"Bonjour, ravi de vous revoir ! 🍷":"Bonjour ! Je suis le sommelier de votre magasin. 🍷")+"\n\nPosez-moi n'importe quelle question sur le vin — budget, accord, cépage, occasion...\nJe vous guide vers le vin parfait !", wines:[]};
   // Prompt enrichi avec les goûts du client connecté (notes de sa collection)
   const persoPrompt = useMemo(()=>{
     if (!customer) return SYS_PROMPT;
@@ -1771,7 +1790,7 @@ function Chat({setView, collector, customer}) {
     setMsgs(newMsgs);
     setLoading(true);
     const history = newMsgs.map(m=>({role:m.role==='assistant'?'assistant':'user',content:m.text}));
-    const resp = await askGabriel(history, persoPrompt);
+    const resp = await askSommelier(history, persoPrompt);
     setMsgs(m=>[...m,{role:'assistant',text:resp.text,wines:resp.wines||[]}]);
     setLoading(false);
     if (isVoice&&resp) speak(resp.text);
@@ -1785,7 +1804,7 @@ function Chat({setView, collector, customer}) {
   return (
     <div style={{display:'flex',flexDirection:'column',height:'calc(100vh - 34px)',background:C.bg}}>
       <style>{'@keyframes pulseMic{0%{box-shadow:0 0 0 0 rgba(107,31,42,.5)}70%{box-shadow:0 0 0 10px transparent}100%{box-shadow:0 0 0 0 transparent}}'}</style>
-      <Header title="🍷 Sommelier Gabriel" subtitle="IA · Répond en temps réel" onBack={()=>setView('home')}
+      <Header title="Votre sommelier" subtitle="Répond en temps réel" onBack={()=>setView('home')}
         right={collector.totalCards>0?<div style={{background:'rgba(107,31,42,.08)',border:'1px solid '+C.bord,borderRadius:50,padding:'4px 12px',fontSize:11,color:C.wine}}>🏆 {collector.totalCards}</div>:null}/>
       <div style={{flex:1,overflowY:'auto',padding:'14px',display:'flex',flexDirection:'column',gap:10}}>
         {msgs.map((m,i)=>(
@@ -1823,20 +1842,20 @@ function Chat({setView, collector, customer}) {
             )}
           </div>
         ))}
-        {loading&&<div style={{alignSelf:'flex-start',background:C.cream,border:'1px solid '+C.bord,borderRadius:'15px 15px 15px 3px',padding:'10px 14px',fontSize:13,color:C.muted}}>🍷 Gabriel réfléchit...</div>}
+        {loading&&<div style={{alignSelf:'flex-start',background:C.cream,border:'1px solid '+C.bord,borderRadius:'15px 15px 15px 3px',padding:'10px 14px',fontSize:13,color:C.muted}}>Le sommelier réfléchit…</div>}
         <div ref={bottomRef}/>
       </div>
       {(mic==='listening'||mic==='speaking')&&(
         <div style={{textAlign:'center',fontSize:12,padding:'4px 12px',color:mic==='speaking'?C.light:C.wine,flexShrink:0,background:C.bg2,borderTop:'1px solid '+C.bord}}>
           {mic==='listening'
             ? <span>🎙 <b>{transcript||"Parlez... appuyez à nouveau pour envoyer"}</b></span>
-            : <span>🔊 Gabriel parle... <button onClick={()=>{speechSynthesis.cancel();}} style={{marginLeft:8,background:'none',border:'1px solid '+C.bord2,borderRadius:50,padding:'1px 8px',fontSize:10,cursor:'pointer',color:C.wine}}>Arrêter</button></span>
+            : <span>🔊 Le sommelier parle… <button onClick={()=>{speechSynthesis.cancel();}} style={{marginLeft:8,background:'none',border:'1px solid '+C.bord2,borderRadius:50,padding:'1px 8px',fontSize:10,cursor:'pointer',color:C.wine}}>Arrêter</button></span>
           }
         </div>
       )}
       <div style={{display:'flex',gap:8,padding:'10px 13px',borderTop:'1px solid '+C.bord,background:C.cream,flexShrink:0,alignItems:'center'}}>
         <button onClick={toggle} style={{width:40,height:40,borderRadius:'50%',border:'none',fontSize:18,cursor:'pointer',flexShrink:0,animation:mic==='listening'?'pulseMic 1.2s infinite':'none',...(micColors[mic]||micColors.off)}}>{micIcons[mic]||'🎙'}</button>
-        <input style={{flex:1,background:C.bg,border:'1px solid '+C.bord,color:C.text,borderRadius:10,padding:'9px 13px',fontSize:13,outline:'none',fontFamily:'Montserrat,sans-serif'}} value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>e.key==='Enter'&&send()} placeholder="Écrivez ou parlez à Gabriel..."/>
+        <input style={{flex:1,background:C.bg,border:'1px solid '+C.bord,color:C.text,borderRadius:10,padding:'9px 13px',fontSize:13,outline:'none',fontFamily:'Montserrat,sans-serif'}} value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>e.key==='Enter'&&send()} placeholder="Écrivez ou parlez au sommelier…"/>
         <button onClick={()=>send()} disabled={loading} style={{background:C.wine,color:'#fdf8f0',border:'none',borderRadius:50,padding:'9px 18px',cursor:'pointer',fontFamily:'Montserrat,sans-serif',fontSize:13,flexShrink:0}}>Envoyer</button>
       </div>
       {modal&&<WineModal wine={modal} onClose={()=>setModal(null)} onCollect={()=>{handleCollect(modal);setModal(null);}}/>}
@@ -1923,7 +1942,7 @@ function LoginScreen({setView, customerApi}) {
           <div style={{background:C.cream,border:'1px solid '+C.bord,borderRadius:15,padding:'30px 18px'}}>
             <div style={{fontSize:44,marginBottom:10}}>✅</div>
             <div style={{...serif,fontSize:20,color:C.wine,marginBottom:6}}>{welcome.isNew?'Bienvenue !':'Bon retour, '+welcome.profile.name+' !'}</div>
-            <p style={{fontSize:12,color:C.muted}}>{welcome.isNew?'Votre profil client vient d\'être créé. Vos cartes et vos notes seront désormais liées à votre carte.':'Votre collection et vos préférences sont chargées. Gabriel vous connaît déjà !'}</p>
+            <p style={{fontSize:12,color:C.muted}}>{welcome.isNew?'Votre profil client vient d\'être créé. Vos cartes et vos notes seront désormais liées à votre carte.':'Votre collection et vos préférences sont chargées. Le sommelier tient compte de vos goûts.'}</p>
           </div>
         ) : cust ? (
           <div style={{background:C.cream,border:'1px solid '+C.bord,borderRadius:15,padding:'26px 18px'}}>
@@ -2562,7 +2581,7 @@ function Admin({setView}) {
             ))}
             <div style={{background:C.cream,border:'1px solid '+C.bord,borderRadius:11,padding:'14px'}}>
               <div style={{...serif,fontSize:14,color:C.wine,marginBottom:6}}>🔗 Intégration logiciel de caisse</div>
-              <p style={{fontSize:12,color:C.muted,marginBottom:11,lineHeight:1.6}}>Connectez Wine Select à votre logiciel de caisse pour valider automatiquement les achats.</p>
+              <p style={{fontSize:12,color:C.muted,marginBottom:11,lineHeight:1.6}}>Connectez WineSelect à votre logiciel de caisse pour valider automatiquement les achats.</p>
               <div style={{display:'flex',gap:7,flexWrap:'wrap',marginBottom:11}}>
                 {['Lightspeed','Tiller','Zelty','Storeline','Autre'].map(s=>(
                   <button key={s} onClick={()=>notify('Contactez-nous pour configurer '+s)} style={{background:C.bg,border:'1px solid '+C.bord,color:C.wine,borderRadius:50,padding:'5px 13px',fontSize:11,cursor:'pointer',fontFamily:'Montserrat,sans-serif'}}>{s}</button>
@@ -2571,7 +2590,7 @@ function Admin({setView}) {
               <div style={{background:'#f0f4ff',border:'1px solid #d0d8ff',borderRadius:8,padding:'9px 13px',fontSize:12,color:'#4040a0'}}>💡 L'intégration caisse permet la validation automatique des achats pour le programme collectors.</div>
             </div>
             <div style={{background:C.cream,border:'1px solid '+C.bord,borderRadius:11,padding:'14px'}}>
-              <div style={{...serif,fontSize:14,color:C.wine,marginBottom:6}}>🤖 Gabriel — IA</div>
+              <div style={{...serif,fontSize:14,color:C.wine,marginBottom:6}}>Sommelier — IA</div>
               <div style={{marginBottom:9}}><div style={{fontSize:11,color:C.muted,marginBottom:4}}>Prestataire IA</div>
                 <select defaultValue="mistral" style={{width:'100%',background:C.bg,border:'1px solid '+C.bord,color:C.text,borderRadius:7,padding:'7px 10px',fontSize:13,outline:'none',fontFamily:'Montserrat,sans-serif'}}>
                   <option value="mistral">Mistral AI</option><option value="openai">OpenAI GPT-4o</option><option value="anthropic">Anthropic Claude</option>

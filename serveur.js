@@ -239,7 +239,7 @@ makePersistedRoute('profiles');         // ws_profiles — écriture continue pa
 makePersistedRoute('global-ratings');   // ws_global_ratings — idem
 // stock-overrides : alimenté UNIQUEMENT depuis Admin > Config (import CSV /
 // mise en avant), donc protégé par token admin. onWrite réapplique aussitôt
-// les overrides sur le catalogue servi à Gabriel (voir applyStockOverrides).
+// les overrides sur le catalogue servi au sommelier (voir applyStockOverrides).
 makePersistedRoute('stock-overrides', {
   protect: true,
   defaultValue: [],
@@ -307,9 +307,9 @@ app.get('/profils-vins', (req, res) => {
 // WINES_CATALOG = BASE_CATALOG + overrides stock/prix/mise en avant importés
 // depuis Admin > Config (data/stock-overrides.json). C'est TOUJOURS
 // WINES_CATALOG qu'utilisent /sommelier et /selection-accord, pour que
-// Gabriel raisonne sur les mêmes prix/stock que ceux affichés sur les
+// le sommelier raisonne sur les mêmes prix/stock que ceux affichés sur les
 // cartes côté client après un import CSV — avant ce correctif, un import
-// mettait à jour l'affichage mais Gabriel continuait de filtrer avec les
+// mettait à jour l'affichage mais le sommelier continuait de filtrer avec les
 // anciens prix de wines-data.js (budget/stock potentiellement incohérents).
 let BASE_CATALOG   = [];
 let WINES_CATALOG  = [];
@@ -345,7 +345,7 @@ function loadCatalog() {
 
 // Fusionne data/stock-overrides.json (id, stock, price, featured) sur
 // BASE_CATALOG pour produire WINES_CATALOG. Appelé au démarrage et après
-// chaque import CSV / mise en avant depuis Admin > Config, pour que Gabriel
+// chaque import CSV / mise en avant depuis Admin > Config, pour que le sommelier
 // voie immédiatement les nouveaux prix/stocks sans redémarrer le serveur.
 // ── Identité des vins (libellé) ─────────────────────────────────────────────
 // Même règle que libelleVin() dans WineSelect.html — les deux doivent rester
@@ -401,7 +401,7 @@ function applyStockOverridesBase() {
 // La dictée vocale (micro de la borne) transcrit parfois les nombres en toutes
 // lettres ("vingt-cinq euros") plutôt qu'en chiffres. Les regex de detectBudget
 // ne matchent que des chiffres : sans cette normalisation, un budget dicté à la
-// voix n'est jamais détecté et Gabriel perd toute contrainte de prix.
+// voix n'est jamais détecté et le sommelier perd toute contrainte de prix.
 const FR_UNITS = {zero:0,un:1,une:1,deux:2,trois:3,quatre:4,cinq:5,six:6,sept:7,huit:8,neuf:9,
   dix:10,onze:11,douze:12,treize:13,quatorze:14,quinze:15,seize:16};
 const FR_TENS  = {vingt:20,trente:30,quarante:40,cinquante:50,soixante:60,septante:70,octante:80,nonante:90};
@@ -476,7 +476,7 @@ function parseBudget(txt) {
 
   // Plancher ouvert, sans plafond annoncé par le client : "25€ et plus",
   // "à partir de 25€", "au moins 25€", "minimum 25€". On calcule un plafond
-  // raisonnable (montée en gamme progressive) plutôt que de laisser Gabriel
+  // raisonnable (montée en gamme progressive) plutôt que de laisser le sommelier
   // sans aucune limite haute.
   const floorOpen = txt.match(/(\d+)\s*(?:€|euros?)?\s*(?:et\s+plus|ou\s+plus|voire\s+plus)/)
                   || txt.match(/(?:à\s+partir\s+de|au\s+moins|minimum|min\.?)\s*(?:de)?\s*(\d+)/);
@@ -720,7 +720,7 @@ app.post('/sommelier', rateLimit(30), async (req, res) => {
     let check = validate(text);
 
     if (!check.ok) {
-      console.warn('⚠️  Réponse Gabriel non conforme (' + check.reason + ') → retry correctif');
+      console.warn('⚠️  Réponse du sommelier non conforme (' + check.reason + ') → retry correctif');
 
       let correction = '\n\n>>> CORRECTION OBLIGATOIRE <<<';
       correction += '\nTa réponse précédente était invalide (' + check.reason + ').';
@@ -764,7 +764,7 @@ app.post('/sommelier', rateLimit(30), async (req, res) => {
     }
 
     if (check.chosen) {
-      console.log('✅ Gabriel propose:', check.chosen.map(w => w.name + ' (' + w.price + '€)').join(', '));
+      console.log('✅ Sommelier propose:', check.chosen.map(w => w.name + ' (' + w.price + '€)').join(', '));
     }
 
     return res.json({ text });
@@ -776,9 +776,9 @@ app.post('/sommelier', rateLimit(30), async (req, res) => {
 });
 
 // ── Route questionnaire guidé (3 questions) ───────────────────────────────────
-// Applique le même raisonnement que Gabriel (chat libre) : le type/budget/
+// Applique le même raisonnement que le sommelier (chat libre) : le type/budget/
 // accord choisis par le client servent de FILTRE DE SÉCURITÉ (jamais de
-// contresens comme un rouge tannique avec un poisson cru), puis Gabriel
+// contresens comme un rouge tannique avec un poisson cru), puis le sommelier
 // choisit 3 vins DANS ce sous-ensemble en se basant sur les vraies données
 // du vin (cépage, région, notes de dégustation) plutôt que sur un simple
 // tri par prix — exactement le même travail que dans le chat.
@@ -836,7 +836,7 @@ app.post('/selection-accord', rateLimit(30), async (req, res) => {
   if (!pool.length) pool = WINES_CATALOG;
 
   // Pour la tranche "25€ et plus" (sans plafond), on limite le vivier envoyé
-  // à Gabriel à des prix raisonnables (jusqu'à 110€) pour ne pas partir sur
+  // au sommelier à des prix raisonnables (jusqu'à 110€) pour ne pas partir sur
   // des cuvées d'exception dès le premier questionnaire.
   const closedBracket = bracket.max !== Infinity;
   const basePool = closedBracket ? pool : pool.filter(w => w.price <= 110);
@@ -853,7 +853,7 @@ app.post('/selection-accord', rateLimit(30), async (req, res) => {
   const span = closedBracket ? Math.max(1, bracket.max - bracket.min) : 1;
   // Bonus "sélection magasin" : même ordre de grandeur que le biais tranche
   // haute (max 15) — ça augmente les chances qu'un vin mis en avant fasse
-  // partie du vivier envoyé à Gabriel, mais ne dicte jamais SON choix parmi
+  // partie du vivier envoyé au sommelier, mais ne dicte jamais SON choix parmi
   // ce vivier : le raisonnement accord/structure reste géré exclusivement
   // par le prompt ci-dessous, jamais par ce score.
   const FEATURED_BONUS = 8;
@@ -891,7 +891,7 @@ app.post('/selection-accord', rateLimit(30), async (req, res) => {
     ' | cépage: ' + w.grape + ' | note:' + w.rating + ' | dégustation: ' + w.tastingNotes +
     (featuredSet.has(w.id) ? ' | [MIS EN AVANT PAR LE MAGASIN]' : '');
 
-  const system = 'Tu es Gabriel, sommelier expert. Un client a choisi, via un questionnaire guidé : ' +
+  const system = 'Tu es le sommelier de la borne WineSelect (sans prénom), sommelier expert. Un client a choisi, via un questionnaire guidé : ' +
     'type de vin = ' + type + ', budget = ' + budget + '€, accord recherché = ' + (pairing || 'aucun en particulier') +
     (detail ? ', précision sur le plat = ' + detail : '') + '.\n' +
     (pairing ? 'RÈGLE D\'ACCORD : ' + (PAIRING_RULES[pairing] || 'adapte le vin au plat.') + '\n' : '') +
@@ -1017,7 +1017,7 @@ function callApi({ hostname, path, headers, payload }, tentative = 1) {
 const startedAt = Date.now();
 const server = app.listen(PORT, () => {
   loadCatalog();
-  console.log('\n🍷  Wine Select — Serveur Gabriel');
+  console.log('\n🍷  WineSelect — Serveur');
   console.log('──────────────────────────────────');
   console.log('   http://localhost:' + PORT);
   console.log('   Modèle   : ' + CONFIG.model);
