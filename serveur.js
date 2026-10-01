@@ -134,21 +134,18 @@ app.post('/api/admin-auth', (req, res) => {
   res.json({ ok: false });
 });
 
-// Fichiers servis au navigateur : UNIQUEMENT ce dont la page a besoin (l'appli,
-// le catalogue, les photos, images et polices). Avant, tout le dossier était
-// servi : n'importe qui sur le réseau de la borne pouvait lire api-key.txt,
-// admin-pin.txt, le code du serveur ou data/*.json (dont les prix d'achat)
-// en tapant simplement leur adresse.
-const STATIC_EXT_OK = /\.(html|css|png|jpe?g|webp|gif|svg|ico|woff2?|ttf|otf)$/i;
-const servirFichier = express.static(path.join(__dirname), { dotfiles: 'deny', index: false });
+// Le dossier de la borne est servi tel quel (WineSelect.html, wines-data.js...), mais
+// jamais ses secrets ni ses données : la clé API, le PIN admin, data/ (profils
+// clients, prix d'achat...), les sauvegardes et les outils. Sans ce filtre, n'importe
+// quel appareil du réseau du magasin pouvait lire http://<borne>:3000/api-key.txt.
+const CHEMINS_INTERDITS = /^\/(data|node_modules|tests|site-vitrine)(\/|$)|^\/(api-key|admin-pin)\.txt$|\.(bak|tmp|log|bat|md)$|\.bak-|^\/\./i;
 app.use((req, res, next) => {
-  let p;
-  try { p = decodeURIComponent(req.path); } catch (e) { return res.status(400).end(); }
-  const autorise = p === '/wines-data.js' || p.startsWith('/photos/') ||
-    (!p.startsWith('/data/') && !p.startsWith('/node_modules/') && STATIC_EXT_OK.test(p));
-  if (autorise) return servirFichier(req, res, next);
+  let chemin = '/';
+  try { chemin = decodeURIComponent(req.path); } catch (e) { return res.status(400).end(); }
+  if (CHEMINS_INTERDITS.test(chemin.replace(/\\/g, '/'))) return res.status(404).end();
   next();
 });
+app.use(express.static(path.join(__dirname), { dotfiles: 'deny' }));
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'WineSelect.html')));
 
 // ── Limitation de débit sur les routes qui appellent l'API Mistral ─────────
@@ -245,62 +242,43 @@ makePersistedRoute('stock-overrides', {
   defaultValue: [],
   onWrite: () => applyStockOverrides(),
 });
+// config-reco : stratégie de recommandation choisie par le gérant (Admin > Config).
+// Lecture libre (rien de sensible), écriture réservée à l'admin.
+makePersistedRoute('config-reco', { protect: true, defaultValue: { strategie: 'neutre' } });
 
-// ── Stratégie de recommandation (Admin > Config) ────────────────────────────
-// { strategie: 'neutre' | 'panier' | 'marge' | 'stock' }. Lecture libre (la page
-// l'affiche dans l'admin), écriture réservée au gérant. Le moteur d'accords
-// l'applique aussitôt, uniquement pour départager des vins d'accord équivalent.
-makePersistedRoute('config-reco', {
-  protect: true,
-  defaultValue: { strategie: 'neutre' },
-  onWrite: () => appliquerStrategie(),
-});
-
-// ── Prix d'achat (confidentiels) ────────────────────────────────────────────
-// { "<id du vin>": prix d'achat }. Lecture ET écriture réservées au gérant : ils
-// ne sont jamais montrés aux clients ni envoyés au sommelier. L'import CSV
-// n'envoie que les lignes renseignées : on les FUSIONNE avec l'existant.
-app.get('/api/prix-achat', requireAdminToken, (req, res) => {
-  res.json(readJSON('prix-achat', {}));
-});
+// prix-achat : { id: prix d'achat HT ou TTC, au choix du magasin, tant que c'est
+// cohérent }. Donnée confidentielle : lecture ET écriture réservées à l'admin
+// (contrairement à makePersistedRoute, dont la lecture est libre), jamais copiée
+// dans le navigateur, jamais envoyée à Mistral. Sert au tri « marge » et à
+// l'affichage de la marge dans Admin > Catalogue.
+// POST = fusion : { id: prix } ajoute ou remplace, { id: null } efface.
+app.get('/api/prix-achat', requireAdminToken, (req, res) => res.json(readJSON('prix-achat', {}) || {}));
 app.post('/api/prix-achat', requireAdminToken, (req, res) => {
   try {
-    const actuels = readJSON('prix-achat', {});
-    const recus = (req.body && typeof req.body === 'object') ? req.body : {};
-    Object.keys(recus).forEach(id => {
-      const v = Number(String(recus[id]).replace(',', '.'));
-      if (/^\d+$/.test(id) && isFinite(v) && v > 0) actuels[id] = Math.round(v * 100) / 100;
+    const actuel = readJSON('prix-achat', {}) || {};
+    const maj = (req.body && typeof req.body === 'object') ? req.body : {};
+    Object.keys(maj).forEach(id => {
+      const v = maj[id];
+      if (v === null) delete actuel[id];
+      else if (typeof v === 'number' && v > 0 && v < 100000) actuel[id] = Math.round(v * 100) / 100;
     });
-    writeJSONAtomic('prix-achat', actuels);
-    appliquerStrategie();
-    res.json({ ok: true, total: Object.keys(actuels).length });
+    writeJSONAtomic('prix-achat', actuel);
+    res.json({ ok: true, total: Object.keys(actuel).length });
   } catch (e) {
     console.error('❌ Écriture data/prix-achat.json impossible :', e.message);
     res.status(500).json({ ok: false, error: e.message });
   }
 });
 
-function appliquerStrategie() {
-  if (!ACCORDS || !ACCORDS.definirStrategie) return;
-  const conf = readJSON('config-reco', {});
-  ACCORDS.definirStrategie(conf && conf.strategie, readJSON('prix-achat', {}));
-  console.log('🎯 Stratégie de recommandation : ' + ((conf && conf.strategie) || 'neutre'));
+// Objectif commercial du magasin, lu à chaque demande (fichiers minuscules) :
+// { strategie, prixAchat }. Sert UNIQUEMENT au départage côté serveur (voir
+// bonusStrategie dans accords.js) : jamais envoyé à Mistral ni à l'écran client.
+function lireCommercial() {
+  const conf = readJSON('config-reco', { strategie: 'neutre' }) || {};
+  const strategie = ['neutre', 'panier', 'marge', 'stock'].includes(conf.strategie) ? conf.strategie : 'neutre';
+  const prixAchat = strategie === 'marge' ? (readJSON('prix-achat', {}) || {}) : {};
+  return { strategie, prixAchat };
 }
-
-// ── Profils gustatifs (repli local de la sélection guidée) ──────────────────
-// Si le serveur d'accords ne répond pas pendant un parcours guidé, la page trie
-// elle-même les vins par goût avec ces profils (corps, tanins, fraîcheur...).
-app.get('/profils-vins', (req, res) => {
-  if (!ACCORDS || !ACCORDS.profilerVin) return res.json({});
-  const profils = {};
-  WINES_CATALOG.forEach(w => {
-    try {
-      const p = w.profil || ACCORDS.profilerVin(w);
-      profils[w.id] = { corps: p.corps, tanins: p.tanins || 0, fraicheur: p.fraicheur, boise: p.boise || 0, sucrosite: p.sucrosite || 0 };
-    } catch (e) {}
-  });
-  res.json(profils);
-});
 
 // ── Chargement du catalogue ───────────────────────────────────────────────────
 // BASE_CATALOG = données brutes de wines-data.js, jamais modifiées en mémoire.
@@ -337,7 +315,6 @@ function loadCatalog() {
     BASE_CATALOG = sandbox.window.WINES_DATA || [];
     console.log('📦 Catalogue:', BASE_CATALOG.length, 'vins depuis wines-data.js');
     applyStockOverrides();
-    appliquerStrategie();
   } catch(e) {
     console.warn('⚠️  Erreur catalogue:', e.message);
   }
@@ -441,11 +418,33 @@ function normalizeFrenchNumbers(text) {
 }
 
 // ── Détection du budget ───────────────────────────────────────────────────────
-// Règles :
-//  • Cible TOUJOURS la tranche haute : plancher = 80% du maximum annoncé.
-//  • Plafond souple = 120% du maximum annoncé (légère montée en gamme tolérée)...
-//  • ...SAUF si le client verrouille son budget ("100€ grand maximum", "pas plus
-//    de 80€", "ne pas dépasser 50€", "moins de 60€") → plafond STRICT, jamais dépassé.
+// Règles : on ne sort JAMAIS du budget du client (confiance envers le sommelier).
+//  • max = maximum annoncé, avec une tolérance de 5 % au plus (plafond() ci-dessous)...
+//  • ...et aucune tolérance si le client verrouille son budget ("100€ grand maximum",
+//    "pas plus de 80€", "ne pas dépasser 50€", "moins de 60€") → plafond STRICT.
+//  • min = minimum annoncé ("entre 30 et 50€" → 30€), ou 70 % du max si le client
+//    n'a donné qu'un plafond ("moins de 20€", "20€") ; "autour de 20€" → 80 %.
+//  • paliers = prix visés pour les 3 vins, tous DANS la fourchette.
+// Seule exception : "25€ et plus" (aucun plafond annoncé) → montée en gamme progressive.
+const TOLERANCE_BUDGET = 1.05;
+function plafondBudget(budget) {
+  return budget.max * (budget.strict ? 1 : TOLERANCE_BUDGET);
+}
+const prixTexte = p => (Math.round(p * 100) / 100).toString().replace('.', ',') + '€';
+// Consigne de budget injectée dans le prompt du sommelier (chat libre, avec ou sans
+// moteur d'accords) : les 3 paliers et le prix maximum absolu.
+function consigneBudget(budget) {
+  const t = budget.paliers;
+  return '\nBUDGET DU CLIENT : ' + budget.label + '.' +
+    '\nSTRUCTURE DE PRIX pour tes 3 propositions :' +
+    '\n  🥇 premier vin, la belle affaire : environ ' + Math.round(t[0]) + '€ ou moins' +
+    '\n  ⭐ deuxième vin, au cœur du budget : environ ' + Math.round(t[1]) + '€' +
+    '\n  ✨ troisième vin, le haut de la fourchette : environ ' + Math.round(t[2]) + '€' +
+    '\nLes prix doivent monter du 🥇 au ✨.' +
+    (budget.openFloor
+      ? ' Aucun vin en dessous de ' + Math.round(budget.min) + '€.'
+      : '\nPRIX MAXIMUM ABSOLU : ' + prixTexte(plafondBudget(budget)) + '. Ne le dépasse JAMAIS, même de 1€, sous aucun prétexte : le client doit pouvoir faire confiance à ton conseil.');
+}
 function detectBudget(messages) {
   // On analyse chaque message client du PLUS RÉCENT au plus ancien :
   // si le client change de budget en cours de conversation, c'est le dernier qui compte.
@@ -463,15 +462,20 @@ function parseBudget(txt) {
   const strictRe = /grand\s+max(?:imum)?|pas\s+plus|ne\s+pas\s+d[ée]passer|sans\s+d[ée]passer|tout\s+au\s+plus|au\s+max(?:imum)?\b|plafond|moins\s+de|\d+\s*(?:€|euros?)?\s*(?:max\b|maxi\b|maximum)|(?:max\b|maxi\b|maximum)\s*(?:de)?\s*\d+/;
   const strict = strictRe.test(txt);
 
-  // ref = maximum ANNONCÉ par le client ; min/max = fourchette de tolérance globale
-  const mk = (max, label) => strict
-    ? { min: max * 0.80, max: max,        ref: max, strict: true,  label: label + ' (plafond strict)' }
-    : { min: max * 0.80, max: max * 1.20, ref: max, strict: false, label: label };
+  // min/max = fourchette RÉELLE du client ; ref = maximum annoncé ;
+  // paliers = 3 prix visés, du quart de la fourchette jusqu'au maximum.
+  const mk = (min, max, label, forceStrict) => {
+    const s = strict || !!forceStrict;
+    const span = max - min;
+    return { min, max, ref: max, strict: s, label: label + (s ? ' (plafond strict)' : ''),
+      paliers: [min + span * 0.25, min + span * 0.6, max] };
+  };
 
   const range = txt.match(/entre\s*(\d+)\s*(?:et|à|-)\s*(\d+)/);
   if (range) {
-    const lo = parseInt(range[1]), hi = parseInt(range[2]);
-    return mk(hi, lo + '-' + hi + '€');
+    const a = parseInt(range[1]), b = parseInt(range[2]);
+    const lo = Math.min(a, b), hi = Math.max(a, b);
+    return mk(lo, hi, lo + '-' + hi + '€');
   }
 
   // Plancher ouvert, sans plafond annoncé par le client : "25€ et plus",
@@ -482,24 +486,26 @@ function parseBudget(txt) {
                   || txt.match(/(?:à\s+partir\s+de|au\s+moins|minimum|min\.?)\s*(?:de)?\s*(\d+)/);
   if (floorOpen) {
     const p = parseInt(floorOpen[1]);
-    return { min: p, max: p * 3, ref: Math.round(p * 1.6), strict: false, label: 'à partir de ' + p + '€', openFloor: true };
+    const ref = Math.round(p * 1.6);
+    return { min: p, max: p * 3, ref, strict: false, label: 'à partir de ' + p + '€', openFloor: true,
+      paliers: [ref * 0.8, ref, ref * 1.2] };
   }
 
   const around = txt.match(/(?:autour|environ)\s*(?:de)?\s*(\d+)/);
   if (around) {
     const p = parseInt(around[1]);
-    return mk(p, 'autour de ' + p + '€');
+    return mk(p * 0.8, p, 'autour de ' + p + '€');
   }
   const capped = txt.match(/(?:moins\s+de|pas\s+plus\s+de|ne\s+pas\s+d[ée]passer|sans\s+d[ée]passer|max(?:imum)?\s*(?:de)?)\s*(\d+)/)
               || txt.match(/(\d+)\s*(?:€|euros?)?\s*(?:grand\s+max(?:imum)?|max\b|maxi\b|maximum|tout\s+au\s+plus)/);
   if (capped) {
     const p = parseInt(capped[1]);
-    return { min: p * 0.80, max: p, ref: p, strict: true, label: 'max ' + p + '€ (plafond strict)' };
+    return mk(p * 0.7, p, 'max ' + p + '€', true);
   }
   const exact = txt.match(/(\d+)\s*(?:€|euros?)/);
   if (exact) {
     const p = parseInt(exact[1]);
-    return mk(p, p + '€');
+    return mk(p * 0.7, p, p + '€');
   }
   return null;
 }
@@ -554,12 +560,15 @@ app.post('/sommelier', rateLimit(30), async (req, res) => {
   const { messages, system, featuredIds } = req.body;
   const featuredSet = new Set(Array.isArray(featuredIds) ? featuredIds : []);
   const featuredBonus = w => featuredSet.has(w.id) ? 3 : 0; // même logique de départage que /selection-accord
+  const commercial = lireCommercial();
+  if (commercial.strategie !== 'neutre') console.log('🎯 Stratégie magasin :', commercial.strategie);
 
   const budget  = detectBudget(messages);
   // Moteur d'accords : l'IA décrit le plat, les vins sont notés selon leur profil.
   // null si aucun plat n'est évoqué ou si l'analyse échoue → ancien tri ci-dessous.
   const moteur = (ACCORDS && WINES_CATALOG.length)
-    ? await ACCORDS.preparerSommelier({ messages, system, budget, featuredSet, catalogue: WINES_CATALOG, callApi, config: CONFIG }).catch(() => null)
+    ? await ACCORDS.preparerSommelier({ messages, system, budget, featuredSet, catalogue: WINES_CATALOG, callApi, config: CONFIG,
+        plafond: budget ? plafondBudget(budget) : null, consigneBudget, commercial }).catch(() => null)
     : null;
   const pairing = moteur ? null : detectPairing(messages);
 
@@ -575,19 +584,18 @@ app.post('/sommelier', rateLimit(30), async (req, res) => {
   } else if ((budget || pairing) && WINES_CATALOG.length) {
     const pairingOk = w => !pairing || (w.pairings && w.pairings.includes(pairing));
 
-    // ── Escalier de prix sur 3 paliers, basé sur le MAXIMUM annoncé ──
-    //   🥇 ≈ 80% du max  ·  ⭐ ≈ 100% du max  ·  ✨ ≈ 120% du max (montée en gamme)
-    //   Si plafond strict : 80% / 90% / 100% — on ne dépasse jamais.
+    // ── Escalier de prix sur 3 paliers, tous DANS la fourchette du client ──
+    //   (budget.paliers, calculés par parseBudget) : on ne dépasse jamais le plafond.
     let tiers = null;
     if (budget) {
       const ref = budget.ref || budget.max;
-      const ratios = budget.strict ? [0.80, 0.90, 1.00] : [0.80, 1.00, 1.20];
-      tiers = ratios.map(r => ref * r);
-      const ceiling = budget.max; // déjà égal à ref (strict) ou ref*1.20
+      tiers = budget.paliers;
+      const ceiling = plafondBudget(budget);
 
       // Constitution du vivier, avec replis progressifs si le rayon est pauvre
       // sur ce budget+accord : 1) bande normale  2) plancher abaissé  3) sans accord
-      const inBand = (w, lo) => w.price >= lo && w.price <= ceiling * (budget.strict ? 1.0 : 1.05);
+      // (on n'élargit que vers le BAS : le plafond ne bouge jamais)
+      const inBand = (w, lo) => w.price >= lo && w.price <= ceiling;
       let pool = WINES_CATALOG.filter(w => pairingOk(w) && inBand(w, budget.min * 0.95));
       if (pool.length < 6) pool = WINES_CATALOG.filter(w => pairingOk(w) && inBand(w, ref * 0.55));
       if (pool.length < 3) pool = WINES_CATALOG.filter(w => inBand(w, budget.min * 0.95));
@@ -604,32 +612,30 @@ app.post('/sommelier', rateLimit(30), async (req, res) => {
       tierWines = tiers.map((target, i) => {
         let cands = bands[i];
         if (!cands.length) cands = pool; // bande vide → on propose les plus proches du palier
+        const bonusCom = ACCORDS ? ACCORDS.bonusStrategie(commercial, cands) : () => 0;
         return [...cands].sort((a, b) => {
           const da = Math.abs(a.price - target), db = Math.abs(b.price - target);
           if (Math.abs(da - db) > 2) return da - db;
-          return (b.rating + featuredBonus(b)) - (a.rating + featuredBonus(a));
+          return (featuredBonus(b) + bonusCom(b)) - (featuredBonus(a) + bonusCom(a));
         }).slice(0, 5);
       });
       available = tierWines.flat();
     } else {
-      available = WINES_CATALOG
-        .filter(w => pairingOk(w))
-        .sort((a, b) => (b.rating + featuredBonus(b)) - (a.rating + featuredBonus(a)))
-        .slice(0, 15);
+      // Sans budget annoncé : on reste grand public (45 € maximum), autour du prix médian
+      // de ces vins ; mise en avant magasin et stratégie départagent.
+      const grandPublic = WINES_CATALOG.filter(w => pairingOk(w) && w.price <= 45);
+      const vivier = grandPublic.length >= 3 ? grandPublic : WINES_CATALOG.filter(w => pairingOk(w));
+      const prixTries = vivier.map(w => w.price).sort((a, b) => a - b);
+      const median = prixTries[Math.floor(prixTries.length / 2)] || 15;
+      const bonusCom = ACCORDS ? ACCORDS.bonusStrategie(commercial, vivier) : () => 0;
+      const val = w => featuredBonus(w) + bonusCom(w) - Math.abs(w.price - median) / Math.max(1, median) * 10;
+      available = [...vivier].sort((a, b) => val(b) - val(a)).slice(0, 15);
     }
 
     let inject = '\n\n>>> CONTRAINTES OBLIGATOIRES <<<';
 
     if (budget) {
-      inject += '\nBUDGET MAXIMUM DE RÉFÉRENCE : ' + Math.round(budget.ref || budget.max) + '€ (annoncé par le client).';
-      inject += '\nSTRUCTURE DE PRIX OBLIGATOIRE pour tes 3 propositions :';
-      inject += '\n  🥇 premier vin  : environ ' + Math.round(tiers[0]) + '€';
-      inject += '\n  ⭐ deuxième vin : environ ' + Math.round(tiers[1]) + '€';
-      inject += '\n  ✨ troisième vin : environ ' + Math.round(tiers[2]) + '€' + (budget.strict ? '' : ' (légère montée en gamme au-dessus du budget, à présenter comme telle)');
-      inject += '\nLes prix doivent monter du 🥇 au ✨. Aucun vin en dessous de ' + Math.round(budget.min) + '€.';
-      if (budget.strict) {
-        inject += '\nPLAFOND STRICT : le client a fixé un maximum absolu. Ne dépasse JAMAIS ' + Math.round(budget.max) + '€, même de 1€, sous aucun prétexte.';
-      }
+      inject += consigneBudget(budget);
     }
 
     if (pairing) {
@@ -639,12 +645,12 @@ app.post('/sommelier', rateLimit(30), async (req, res) => {
     if (available.length >= 3) {
       inject += '\nVINS DISPONIBLES — RÈGLE ABSOLUE : tes 3 propositions doivent EXCLUSIVEMENT provenir de ces listes.';
       inject += '\nIgnore tout autre vin du catalogue général, même s\'il te semble pertinent. Proposer un vin hors liste est une erreur grave.';
-      const fmt = w => '\n  ID:' + w.id + ' | ' + (w.libelle || w.name) + ' | ' + w.type + ' | ' + w.price + '€ | ' + w.region + ' | Note:' + w.rating +
+      const fmt = w => '\n  ID:' + w.id + ' | ' + (w.libelle || w.name) + ' | ' + w.type + ' | ' + w.price + '€ | ' + w.region +
         (featuredSet.has(w.id) ? ' | [MIS EN AVANT PAR LE MAGASIN]' : '');
       if (tierWines) {
-        inject += '\nCandidats pour le vin 🥇 :'; tierWines[0].forEach(w => inject += fmt(w));
-        inject += '\nCandidats pour le vin ⭐ :';  tierWines[1].forEach(w => inject += fmt(w));
-        inject += '\nCandidats pour le vin ✨ :';  tierWines[2].forEach(w => inject += fmt(w));
+        inject += '\nCandidats pour le vin 🥇, la BELLE AFFAIRE (le meilleur rapport qualité-prix pour ce plat) :'; tierWines[0].forEach(w => inject += fmt(w));
+        inject += '\nCandidats pour le vin ⭐, au CŒUR du budget :';  tierWines[1].forEach(w => inject += fmt(w));
+        inject += '\nCandidats pour le vin ✨, dans le HAUT de la fourchette (sans la dépasser) :';  tierWines[2].forEach(w => inject += fmt(w));
       } else {
         available.forEach(w => inject += fmt(w));
       }
@@ -653,6 +659,7 @@ app.post('/sommelier', rateLimit(30), async (req, res) => {
           'plusieurs candidats pour un même palier, privilégie ceux-là. Mais ne choisis JAMAIS un vin uniquement parce ' +
           'qu\'il est marqué s\'il correspond moins bien au plat ou au budget qu\'une alternative non marquée.';
       }
+      if (ACCORDS) inject += ACCORDS.consigneOrdre(commercial);
     }
 
     inject += '\n>>> FIN DES CONTRAINTES <<<';
@@ -703,8 +710,11 @@ app.post('/sommelier', rateLimit(30), async (req, res) => {
       if (!ascending) return { ok: false, chosen, reason: 'ordre de prix non croissant' };
 
       if (budget) {
-        const hardMax = budget.max + (budget.strict ? 1 : 3);
-        const outOfRange = chosen.some(w => w.price < budget.min - 3 || w.price > hardMax);
+        // Plafond : jamais dépassé. Plancher souple : le vivier peut descendre sous le
+        // minimum quand le rayon est pauvre (jusqu'à 55 % du maximum annoncé).
+        const hardMax = plafondBudget(budget) + 0.01;
+        const hardMin = Math.min(budget.min - 3, (budget.ref || budget.max) * 0.55);
+        const outOfRange = chosen.some(w => w.price < hardMin || w.price > hardMax);
         if (outOfRange) return { ok: false, chosen, reason: 'vin hors budget' };
       }
 
@@ -786,7 +796,9 @@ const BUDGET_BRACKETS = {
   '-8':    { min: 0,  max: 8   },
   '8-15':  { min: 8,  max: 15  },
   '15-25': { min: 15, max: 25  },
-  '25+':   { min: 25, max: Infinity },
+  '25-50': { min: 25, max: 50  },
+  '50+':   { min: 50, max: Infinity },
+  '25+':   { min: 25, max: Infinity },   // ancienne tranche, gardée pour les écrans pas encore à jour
 };
 
 // Couleurs conseillées pour un plat de la liste (écran « Avez-vous une préférence ? »).
@@ -798,6 +810,21 @@ app.post('/couleurs-conseillees', (req, res) => {
   if (!plat) return res.json({ couleurs: null });
   try { res.json({ couleurs: ACCORDS.couleursConseillees(WINES_CATALOG, plat, bracket) }); }
   catch (e) { console.warn('⚠️  Couleurs conseillées :', e.message); res.json({ couleurs: null }); }
+});
+
+// Profils gustatifs du catalogue, chargés par l'écran au démarrage : ils servent au
+// repli local de la sélection guidée si /selection-accord ne répond pas (sinon ce
+// repli ignore le goût et propose, par exemple, un Pomerol pour un « rouge léger »).
+app.get('/profils-vins', (req, res) => {
+  try {
+    const { profilerVin } = require('./profils-reference.js');
+    const out = {};
+    WINES_CATALOG.forEach(w => {
+      const p = w.profil || profilerVin(w);
+      out[w.id] = { corps: p.corps, tanins: p.tanins || 0, fraicheur: p.fraicheur, sucrosite: p.sucrosite || 0, boise: p.boise || 0 };
+    });
+    res.json(out);
+  } catch (e) { console.warn('⚠️  Profils des vins :', e.message); res.json({}); }
 });
 
 app.post('/selection-accord', rateLimit(30), async (req, res) => {
@@ -815,7 +842,7 @@ app.post('/selection-accord', rateLimit(30), async (req, res) => {
   // Nouveau parcours « Je cherche un vin pour… » : l'écran envoie une occasion.
   // Sans occasion (ancienne version de l'écran), on garde l'ancien fonctionnement ci-dessous.
   if (ACCORDS && req.body.occasion) {
-    return ACCORDS.selectionGuidee(req.body, bracket, featuredSet, res, { catalogue: WINES_CATALOG, callApi, config: CONFIG })
+    return ACCORDS.selectionGuidee(req.body, bracket, featuredSet, res, { catalogue: WINES_CATALOG, callApi, config: CONFIG, commercial: lireCommercial() })
       .catch(e => {
         console.error('Erreur moteur parcours guidé:', e.message);
         if (!res.headersSent) res.status(500).json({ error: 'parcours guidé indisponible' });
@@ -835,7 +862,7 @@ app.post('/selection-accord', rateLimit(30), async (req, res) => {
   if (pool.length < 3) { pool = WINES_CATALOG.filter(w => matchType(w)); poolLabel = 'type seul'; }
   if (!pool.length) pool = WINES_CATALOG;
 
-  // Pour la tranche "25€ et plus" (sans plafond), on limite le vivier envoyé
+  // Pour la tranche "50€ et plus" (sans plafond), on limite le vivier envoyé
   // au sommelier à des prix raisonnables (jusqu'à 110€) pour ne pas partir sur
   // des cuvées d'exception dès le premier questionnaire.
   const closedBracket = bracket.max !== Infinity;
@@ -847,8 +874,7 @@ app.post('/selection-accord', rateLimit(30), async (req, res) => {
   // réparties uniformément — même logique que /sommelier (chat libre) où
   // le budget de référence est le max annoncé. On pondère donc la note par
   // la proximité au point de référence (75% de la tranche), sans jamais
-  // exclure les vins moins chers : un vin nettement mieux noté ou plus
-  // singulier reste éligible même s'il est proche du bas de la tranche.
+  // exclure les vins moins chers : l'IA choisit ensuite selon l'accord.
   const ref = closedBracket ? bracket.min + (bracket.max - bracket.min) * 0.75 : null;
   const span = closedBracket ? Math.max(1, bracket.max - bracket.min) : 1;
   // Bonus "sélection magasin" : même ordre de grandeur que le biais tranche
@@ -860,7 +886,7 @@ app.post('/selection-accord', rateLimit(30), async (req, res) => {
   const scored = basePool.map(w => {
     const proximityBonus = ref !== null ? Math.max(0, 1 - Math.abs(w.price - ref) / span) * 15 : 0;
     const featuredBonus = featuredSet.has(w.id) ? FEATURED_BONUS : 0;
-    return { w, score: w.rating + proximityBonus + featuredBonus };
+    return { w, score: proximityBonus + featuredBonus };
   });
 
   const candidates = scored
@@ -869,15 +895,14 @@ app.post('/selection-accord', rateLimit(30), async (req, res) => {
     .map(s => s.w);
 
   // ── Repli sans IA : on choisit 3 vins à prix croissants dans le vivier,
-  //    puis on leur assigne un rôle par heuristique simple (le mieux noté
-  //    des trois = valeur sûre, le plus atypique en prix = découverte).
+  //    puis on leur assigne un rôle par heuristique simple (le moins cher
+  //    des trois = valeur sûre).
   const fallbackWines = candidates.slice().sort((a, b) => a.price - b.price).slice(0, 3);
   const fallbackIds = fallbackWines.map(w => w.id);
   const fallbackRoles = (() => {
     if (fallbackWines.length < 3) return {};
-    const byRating = [...fallbackWines].sort((a, b) => b.rating - a.rating);
-    const roles = { [byRating[0].id]: 'valeur_sure' };
-    const rest = fallbackWines.filter(w => w.id !== byRating[0].id);
+    const roles = { [fallbackWines[0].id]: 'valeur_sure' };
+    const rest = fallbackWines.slice(1);
     roles[rest[0].id] = 'coup_de_coeur';
     roles[rest[1].id] = 'decouverte';
     return roles;
@@ -888,7 +913,7 @@ app.post('/selection-accord', rateLimit(30), async (req, res) => {
   }
 
   const fmt = w => '\n  ID:' + w.id + ' | ' + (w.libelle || w.name) + ' | ' + w.price + '€ | ' + w.region +
-    ' | cépage: ' + w.grape + ' | note:' + w.rating + ' | dégustation: ' + w.tastingNotes +
+    ' | cépage: ' + w.grape + ' | dégustation: ' + w.tastingNotes +
     (featuredSet.has(w.id) ? ' | [MIS EN AVANT PAR LE MAGASIN]' : '');
 
   const system = 'Tu es le sommelier de la borne WineSelect (sans prénom), sommelier expert. Un client a choisi, via un questionnaire guidé : ' +
@@ -908,7 +933,7 @@ app.post('/selection-accord', rateLimit(30), async (req, res) => {
       'l\'accord et la qualité de la recommandation priment toujours sur ce marquage.\n' : '') +
     '\n' +
     'En plus du choix, attribue à CHAQUE vin un rôle parmi ces 3 (chacun utilisé UNE SEULE fois) :\n' +
-    '  - "valeur_sure" : vin fiable, typique de son appellation/cépage, bon rapport note/prix — le choix sans surprise.\n' +
+    '  - "valeur_sure" : vin fiable, typique de son appellation/cépage, bon rapport qualité-prix — le choix sans surprise.\n' +
     '  - "coup_de_coeur" : le vin qui fait le meilleur accord avec le plat, ou le plus séduisant en intensité/équilibre.\n' +
     '  - "decouverte" : vin plus atypique — cépage rare, région moins connue, style original — indépendamment de son prix ' +
     '(une découverte n\'est PAS forcément la plus chère des trois).\n' +

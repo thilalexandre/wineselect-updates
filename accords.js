@@ -323,9 +323,9 @@ function decrirePlat(d) {
 }
 
 // ── 4. Candidats envoyés au sommelier ──────────────────────────────────────────
-// Même escalier de prix que l'ancien système (🥇 ≈ 80 % du max, ⭐ ≈ 100 %,
-// ✨ ≈ 120 %, ou 80/90/100 % si plafond strict), mais les vins sont retenus
-// et classés selon leur note d'accord avec le plat, plus selon une étiquette.
+// Escalier de 3 prix, tous DANS la fourchette du client (budget.paliers, voir
+// parseBudget dans serveur.js) ; les vins sont retenus et classés selon leur
+// note d'accord avec le plat, jamais selon une étiquette.
 const PREMIUM = /peu importe le prix|grande occasion|grand cru|prestige|meilleur vin|sans limite|exceptionnel/i;
 
 // Vivier de candidats : jamais de vin mal accordé pour « compléter » une liste trop courte.
@@ -347,46 +347,62 @@ function vivier(lst, couleurGardee) {
   return gardes.concat(base.filter(n => !gardes.includes(n)));
 }
 const ARTICLE = { rouge: 'du rouge', blanc: 'du blanc', 'rosé': 'du rosé', bulles: 'des bulles' };
-
-// ── Stratégie de recommandation du magasin (Admin > Config) ─────────────────
-// Elle ne fait que DÉPARTAGER des vins également bien accordés : un petit bonus
-// (0 à STRATEGIE_BONUS_MAX points) selon la position du vin parmi les candidats,
-// bien inférieur aux écarts d'accord. Elle agit sur la présélection, jamais sur
-// ce que le sommelier dit des vins. Les prix d'achat restent confidentiels :
-// ils ne servent qu'ici et ne sont jamais envoyés au sommelier.
-//   neutre : aucun bonus (comportement historique)
-//   panier : les prix les plus hauts parmi les candidats
-//   marge  : la marge brute en euros la plus élevée (vins sans prix d'achat : aucun bonus)
-//   stock  : les stocks les plus élevés
-const STRATEGIE_BONUS_MAX = 4;
-let STRATEGIE = { id: 'neutre', prixAchat: {} };
-function definirStrategie(id, prixAchat) {
-  STRATEGIE = {
-    id: ['neutre', 'panier', 'marge', 'stock'].includes(id) ? id : 'neutre',
-    prixAchat: prixAchat && typeof prixAchat === 'object' ? prixAchat : {},
-  };
-}
-// Renvoie une fonction vin → bonus, calculée sur la liste de candidats fournie
-// (rang du vin dans cette liste selon le critère de la stratégie).
-function bonusStrategie(vins) {
-  const id = STRATEGIE.id;
-  if (id === 'neutre' || !vins.length) return () => 0;
-  const critere = w => {
-    if (id === 'panier') return w.price;
-    if (id === 'stock') return typeof w.stock === 'number' ? w.stock : null;
-    const pa = STRATEGIE.prixAchat[w.id];
-    return typeof pa === 'number' && pa > 0 ? w.price - pa : null;
-  };
-  const valeurs = [...new Set(vins.map(critere).filter(v => v !== null))].sort((a, b) => a - b);
-  if (valeurs.length < 2) return () => 0;
-  return w => {
-    const v = critere(w);
-    return v === null ? 0 : STRATEGIE_BONUS_MAX * valeurs.indexOf(v) / (valeurs.length - 1);
-  };
-}
 const PLURIEL = { rouge: 'rouges', blanc: 'blancs', 'rosé': 'rosés', bulles: 'vins effervescents' };
 
-function construireCandidats(wines, d, budget, featuredSet, texteClient, aleatoire) {
+// ── Stratégie de recommandation du magasin (Admin → Config) ─────────────────
+// La PERTINENCE d'abord : la stratégie ne sert qu'à départager des vins à peu près
+// également accordés. Elle ajoute au plus BONUS_STRATEGIE_MAX points, alors qu'un
+// cran de pertinence (« Bon accord » → « Très bon accord ») en vaut 13 : elle ne
+// fait jamais passer un vin moins bien accordé devant un meilleur accord net.
+// Elle n'influence que la liste envoyée au sommelier, jamais son argumentaire, et
+// aucune donnée de marge ou de prix d'achat n'est jamais transmise à Mistral.
+//   neutre : aucun départage commercial (défaut)
+//   panier : le haut de la fourchette de prix
+//   marge  : la marge brute en euros la plus élevée (prix - prix d'achat) ;
+//            un vin sans prix d'achat connu n'a simplement pas de bonus
+//   stock  : les stocks les plus élevés
+const STRATEGIES = ['neutre', 'panier', 'marge', 'stock'];
+const BONUS_STRATEGIE_MAX = 4;
+// commercial = { strategie, prixAchat: { id: prix } } → fonction vin → bonus (0 à 4),
+// calculée relativement aux vins du vivier (le plus cher, le plus margé... reçoit 4).
+function bonusStrategie(commercial, vins) {
+  const strategie = commercial && STRATEGIES.includes(commercial.strategie) ? commercial.strategie : 'neutre';
+  if (strategie === 'neutre' || !vins.length) return () => 0;
+  const prixAchat = (commercial && commercial.prixAchat) || {};
+  const valeur = w => {
+    if (strategie === 'panier') return w.price;
+    if (strategie === 'stock') return typeof w.stock === 'number' ? w.stock : null;
+    const pa = prixAchat[w.id];
+    return typeof pa === 'number' && pa > 0 ? w.price - pa : null;
+  };
+  const vals = new Map();
+  vins.forEach(w => { const v = valeur(w); if (v !== null && !isNaN(v)) vals.set(w.id, v); });
+  if (!vals.size) return () => 0;
+  const min = Math.min(...vals.values()), max = Math.max(...vals.values());
+  if (max === min) return () => 0;
+  const bonus = v => BONUS_STRATEGIE_MAX * (v - min) / (max - min);
+  // Vin sans donnée (ex. prix d'achat non renseigné) : ni avantagé ni pénalisé,
+  // il reçoit le bonus moyen des vins renseignés.
+  const moyen = [...vals.values()].reduce((s, v) => s + bonus(v), 0) / vals.size;
+  return w => vals.has(w.id) ? bonus(vals.get(w.id)) : moyen;
+}
+// Consigne ajoutée au prompt quand une stratégie est active : seul l'ORDRE de la liste
+// porte la préférence du magasin (aucune donnée de marge, de stock ni de prix d'achat).
+function consigneOrdre(commercial) {
+  if (!commercial || !STRATEGIES.includes(commercial.strategie) || commercial.strategie === 'neutre') return '';
+  return '\nLes vins de chaque liste sont classés par ordre de préférence du magasin. À accord ÉGAL, préfère les premiers de la liste ; ' +
+    'ne choisis jamais un vin moins bien accordé pour cette raison, et n\'en parle jamais au client.';
+}
+
+// Réordonne un vivier (déjà trié par pertinence) avec le départage commercial.
+// Les vins « gardés » (couleur imposée, bonus 30) restent en tête.
+function departager(lst, commercial, bonusFixe) {
+  const bonusCom = bonusStrategie(commercial, lst.map(n => n.wine));
+  const val = n => n.score + bonusCom(n.wine) + (bonusFixe ? bonusFixe(n) : 0);
+  return [...lst].sort((a, b) => val(b) - val(a));
+}
+
+function construireCandidats(wines, d, budget, featuredSet, texteClient, aleatoire, commercial) {
   featuredSet = featuredSet || new Set();
   const bonusSel = w => featuredSet.has(w.id) ? 3 : 0;
   const noter = lst => lst
@@ -408,12 +424,7 @@ function construireCandidats(wines, d, budget, featuredSet, texteClient, aleatoi
       notes = notes.concat(autres);
     }
   }
-  notes.sort((a, b) => (b.score + bonusSel(b.wine)) - (a.score + bonusSel(a.wine)) || b.wine.rating - a.wine.rating);
-  // Stratégie du magasin : départage les vins d'accord équivalent (voir bonusStrategie)
-  const bonusStrat = bonusStrategie(notes.map(n => n.wine));
-  if (STRATEGIE.id !== 'neutre') {
-    notes.sort((a, b) => (b.score + bonusSel(b.wine) + bonusStrat(b.wine)) - (a.score + bonusSel(a.wine) + bonusStrat(a.wine)) || b.wine.rating - a.wine.rating);
-  }
+  notes.sort((a, b) => (b.score + bonusSel(b.wine)) - (a.score + bonusSel(a.wine)));
   const parId = new Map(notes.map(n => [n.wine.id, n]));
   const bonusGarde = n => (compromis && n.wine.type === compromis.couleur) ? 30 : 0;
 
@@ -424,8 +435,8 @@ function construireCandidats(wines, d, budget, featuredSet, texteClient, aleatoi
 
   if (budget && !compromis) {
     const ref = budget.ref || budget.max;
-    const ratios = budget.strict ? [0.80, 0.90, 1.00] : [0.80, 1.00, 1.20];
-    const tiers = ratios.map(r => ref * r);
+    // Paliers calculés par serveur.js (parseBudget), tous dans la fourchette du client
+    const tiers = budget.paliers || [0.80, 0.90, 1.00].map(r => ref * r);
     const ceiling = budget.max * (budget.strict ? 1.0 : 1.05);
     const dansBande = (n, lo) => n.wine.price >= lo && n.wine.price <= ceiling;
     fenetre = notes.filter(n => dansBande(n, budget.min * 0.95));
@@ -440,7 +451,13 @@ function construireCandidats(wines, d, budget, featuredSet, texteClient, aleatoi
     ];
     tierWines = tiers.map((target, i) => {
       const cands = bandes[i].length ? bandes[i] : pool;
-      const val = n => n.score + bonusSel(n.wine) + bonusStrat(n.wine) + bonusGarde(n) - Math.abs(n.wine.price - target) / target * 20;
+      const bonusCom = bonusStrategie(commercial, cands.map(n => n.wine));
+      // 🥇 = belle affaire : le meilleur accord à prix doux (le moins cher départage) ;
+      // ⭐ et ✨ : les mieux accordés autour du cœur puis du haut de la fourchette.
+      const prix = i === 0
+        ? n => n.wine.price / target * 4
+        : n => Math.abs(n.wine.price - target) / target * 20;
+      const val = n => n.score + bonusSel(n.wine) + bonusGarde(n) + bonusCom(n.wine) - prix(n);
       return [...cands].sort((a, b) => val(b) - val(a)).slice(0, 5).map(n => n.wine);
     });
     available = [...new Set(tierWines.flat())];
@@ -453,21 +470,24 @@ function construireCandidats(wines, d, budget, featuredSet, texteClient, aleatoi
     fenetre = notes.filter(n => dansBande(n, budget.min * 0.95));
     let pool = compatibles(fenetre);
     if (pool.length < 3) { fenetre = notes.filter(n => dansBande(n, (budget.ref || budget.max) * 0.55)); pool = compatibles(fenetre); }
-    available = pool.slice(0, 15).map(n => n.wine);
+    available = departager(pool, commercial, n => bonusGarde(n) + bonusSel(n.wine)).slice(0, 15).map(n => n.wine);
   } else {
     const plafond = PREMIUM.test(texteClient || '') ? Infinity : REGLAGES.prixMaxSansBudget;
     fenetre = notes.filter(n => n.wine.price <= plafond);
-    available = compatibles(fenetre).slice(0, 15).map(n => n.wine);
+    available = departager(compatibles(fenetre), commercial, n => bonusSel(n.wine)).slice(0, 15).map(n => n.wine);
   }
 
   // Rien d'utilisable dans le budget : jamais de liste vide (sinon le sommelier pioche dans
   // tout le catalogue, sans filtre d'accord) → les mieux accordés, prix annoncés.
+  // On reste sous le plafond du client (vins moins chers) ; au-delà seulement si rien d'autre.
   let horsBudget = false;
   if (!available.length) {
     horsBudget = true;
     tierWines = null;
-    fenetre = notes;
-    available = compatibles(notes).slice(0, 15).map(n => n.wine);
+    const plafond = budget ? budget.max * (budget.strict ? 1.0 : 1.05) : Infinity;
+    const sousPlafond = notes.filter(n => n.wine.price <= plafond);
+    fenetre = compatibles(sousPlafond).length ? sousPlafond : notes;
+    available = compatibles(fenetre).slice(0, 15).map(n => n.wine);
   }
 
   // Découverte : un vin d'une autre couleur, seulement si l'accord est excellent
@@ -490,13 +510,26 @@ function construireCandidats(wines, d, budget, featuredSet, texteClient, aleatoi
 }
 
 // Ligne d'un candidat dans le prompt du sommelier
-function ligneCandidat(w, note, featuredSet, decouverte) {
+function ligneCandidat(w, note, featuredSet, decouverte, belle) {
   const raisons = note ? note.plus.slice(0, 3).join(' ; ') : '';
   return '\n  ID:' + w.id + ' | ' + (w.libelle || w.name) + ' | ' + w.type + ' | ' + w.price + '€ | ' + (w.region || '') +
     ' | profil : ' + decrireProfil(w) +
     (note ? ' | accord ' + Math.min(100, note.score) + '/100' + (raisons ? ' : ' + raisons : '') : '') +
     (featuredSet && featuredSet.has(w.id) ? ' | [MIS EN AVANT PAR LE MAGASIN]' : '') +
-    (decouverte && decouverte.id === w.id ? ' | [DÉCOUVERTE]' : '');
+    (decouverte && decouverte.id === w.id ? ' | [DÉCOUVERTE]' : '') +
+    (belle && belle.id === w.id ? ' | [BELLE AFFAIRE]' : '');
+}
+
+// ── Belle affaire ───────────────────────────────────────────────────────────
+// Un critère objectif (pas une note de qualité du vin) : le meilleur ACCORD avec la
+// demande parmi les vins de la moitié basse de la fourchette, à condition que cet
+// accord soit au moins « Très bon » (75). À accord égal, le moins cher.
+const BELLE_AFFAIRE_ACCORD_MIN = 75;
+function choisirBelleAffaire(notesList, min, max) {
+  const haut = min + (max - min) * 0.5;
+  const bas = notesList.filter(n => n.wine.price >= min * 0.95 && n.wine.price <= haut && n.score >= BELLE_AFFAIRE_ACCORD_MIN);
+  if (!bas.length) return null;
+  return bas.sort((a, b) => (b.score - a.score) || (a.wine.price - b.wine.price))[0];
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -575,6 +608,61 @@ const GOUT_COULEUR = {
 // Goûts qui assument l'ampleur, les tanins ou le sucre (pas de pénalité apéritif sur ces points)
 const GOUTS_AMPLES = ['riche_intense', 'rouge_puissant', 'blanc_beurre', 'rose_vineux', 'bulles_vineuses'];
 const GOUTS_DOUX = ['doux', 'blanc_moelleux', 'bulles_douces', 'rose_tendre'];
+
+// ── Notoriété des appellations (parcours « À offrir ») ──────────────────────
+// Ce n'est PAS une note de qualité d'un vin : c'est la réputation de son
+// appellation auprès du grand public, un critère objectif qui compte pour un
+// cadeau (la personne qui reçoit reconnaît le nom). Liste à tenir à jour par
+// le sommelier. Un classement officiel dans le nom de l'appellation
+// (« Grand Cru », « Premier Cru », « 1er Cru ») vaut toujours grand renom.
+const APPELLATIONS_RENOM = {
+  grand: [
+    // Champagne et Bordeaux
+    'Champagne', 'Pauillac', 'Margaux', 'Saint-Julien', 'Saint-Estèphe', 'Pomerol',
+    'Saint-Émilion Grand Cru', 'Pessac-Léognan', 'Sauternes', 'Barsac',
+    // Bourgogne
+    'Chablis Grand Cru', 'Chablis Premier Cru', 'Meursault', 'Puligny-Montrachet', 'Chassagne-Montrachet',
+    'Corton-Charlemagne', 'Gevrey-Chambertin', 'Vosne-Romanée', 'Chambolle-Musigny', 'Morey-Saint-Denis',
+    'Nuits-Saint-Georges', 'Pommard', 'Volnay', 'Beaune', 'Aloxe-Corton', 'Pouilly-Fuissé',
+    // Rhône
+    'Châteauneuf-du-Pape', 'Hermitage', 'Côte-Rôtie', 'Condrieu', 'Cornas',
+    // Loire, Alsace, Jura, Provence
+    'Sancerre', 'Pouilly-Fumé', 'Alsace Grand Cru', 'Château-Chalon', 'Bandol',
+  ],
+  reconnu: [
+    // Bordeaux
+    'Saint-Émilion', 'Haut-Médoc', 'Listrac', 'Moulis-en-Médoc', 'Lalande-de-Pomerol', 'Fronsac', 'Graves',
+    // Bourgogne et Beaujolais
+    'Chablis', 'Mercurey', 'Rully', 'Givry', 'Montagny', 'Santenay', 'Savigny-lès-Beaune', 'Pernand-Vergelesses',
+    'Ladoix', 'Monthelie', 'Auxey-Duresses', 'Saint-Aubin', 'Marsannay', 'Fixin', 'Saint-Véran',
+    'Morgon', 'Moulin-à-Vent', 'Fleurie',
+    // Rhône
+    'Gigondas', 'Vacqueyras', 'Crozes-Hermitage', 'Saint-Joseph', 'Tavel',
+    // Loire
+    'Vouvray', 'Savennières', 'Quarts de Chaume', 'Bonnezeaux', 'Menetou-Salon', 'Chinon', 'Saumur-Champigny',
+    // Sud, Sud-Ouest, Jura, Corse
+    'Cahors', 'Madiran', 'Jurançon', 'Banyuls', 'Collioure', 'Pic Saint-Loup', 'Terrasses du Larzac',
+    'Cassis', 'Palette', 'Patrimonio', 'Arbois',
+    // Étranger
+    'Porto',
+  ],
+};
+const sansAccent = v => String(v || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim();
+const RENOM = {
+  grand: new Set(APPELLATIONS_RENOM.grand.map(sansAccent)),
+  reconnu: new Set(APPELLATIONS_RENOM.reconnu.map(sansAccent)),
+};
+// 2 = grand renom, 1 = appellation reconnue, 0 = sinon.
+// « Chassagne-Montrachet 1er Cru » ou « Châteauneuf-du-Pape Blanc » : on retrouve l'appellation de base.
+function notorieteAppellation(wine) {
+  const a = sansAccent(wine.appellation);
+  if (!a) return 0;
+  if (/\b(grand cru|premier cru|1er cru)\b/.test(a)) return 2;
+  const base = a.replace(/\s+(blanc|rouge|rose)$/, '');
+  if (RENOM.grand.has(base)) return 2;
+  if (RENOM.reconnu.has(base)) return 1;
+  return 0;
+}
 
 function noterStyle(wine, gout, occasion) {
   const p = wine.profil || (wine.profil = profilerVin(wine));
@@ -713,7 +801,10 @@ function noterStyle(wine, gout, occasion) {
     if (p.corps === 3 && !GOUTS_AMPLES.includes(gout)) add(-8, null);
   }
   if (occasion === 'offrir') {
-    add(Math.round(((wine.rating || 85) - 85) * 1.5), (wine.rating || 0) >= 90 ? 'une cuvée reconnue, idéale à offrir' : null);
+    // Goûts inconnus : la notoriété compte davantage (cadeau sans risque) ; goûts connus : le style prime
+    const renom = notorieteAppellation(wine);
+    const poids = gout === 'inconnu' ? [0, 6, 12] : [0, 3, 6];
+    if (renom) add(poids[renom], renom === 2 ? 'une appellation de grand renom, idéale à offrir' : 'une appellation reconnue');
     if (p.source === 'appellation' || p.source === 'manuel') add(4, null);
     if (p.oxydatif && gout === 'inconnu') add(-10, null);
   }
@@ -893,24 +984,41 @@ function candidatsGuides(wines, demande) {
     }
   }
 
-  // Positionnement dans la tranche : haut de tranche pour boire et offrir,
-  // bas de tranche pour cuisiner (pas besoin d'un grand vin dans la casserole).
-  const ref = ouvert ? null : budget.min + (budget.max - budget.min) * (occasion === 'cuisiner' ? 0.25 : 0.75);
+  // Positionnement dans la tranche : cœur de tranche pour boire et offrir (haut de
+  // tranche si le magasin a choisi la stratégie « panier moyen »), bas de tranche
+  // pour cuisiner (pas besoin d'un grand vin dans la casserole).
+  const commercial = demande.commercial || null;
+  const strategie = commercial && commercial.strategie;
+  const position = occasion === 'cuisiner' ? 0.25 : strategie === 'panier' ? 0.75 : 0.5;
+  const ref = ouvert ? null : budget.min + (budget.max - budget.min) * position;
   const span = ouvert ? 1 : Math.max(1, budget.max - budget.min);
-  const bonusStrat = bonusStrategie(notes.map(n => n.wine));
+  const bonusCom = bonusStrategie(commercial, notes.map(n => n.wine));
   const val = n => n.score + (featuredSet.has(n.wine.id) ? 8 : 0) + ((compromis && n.wine.type === compromis.couleur) ? 30 : 0) +
-    (ref === null ? 0 : Math.max(0, 1 - Math.abs(n.wine.price - ref) / span) * 8) + bonusStrat(n.wine);
-  notes.sort((a, b) => val(b) - val(a) || (b.wine.rating || 0) - (a.wine.rating || 0));
+    (ref === null ? 0 : Math.max(0, 1 - Math.abs(n.wine.price - ref) / span) * 8) + bonusCom(n.wine);
+  notes.sort((a, b) => val(b) - val(a));
 
   let retenus = vivier(notes, compromis ? compromis.couleur : null).slice(0, 14);
 
+  // Diversité des prix (boire ou offrir) : le vivier contient toujours, s'ils existent,
+  // une BELLE AFFAIRE (meilleur accord de la moitié basse de la tranche) et un vin bien
+  // accordé du HAUT de la tranche, pour que le sommelier puisse varier ses 3 propositions.
+  let belle = null;
+  if (occasion !== 'cuisiner') {
+    const hi = ouvert ? budget.min * 2 : budget.max;
+    const b = choisirBelleAffaire(notes, budget.min, hi);
+    if (b) { belle = b.wine; if (!retenus.includes(b)) retenus.push(b); }
+    const hautes = notes.filter(n => n.wine.price >= budget.min + (hi - budget.min) * 0.75 && n.wine.price <= hi && n.score >= REGLAGES.seuilCompatible);
+    if (hautes.length && !retenus.some(n => hautes.includes(n))) retenus.push([...hautes].sort((x, y) => y.score - x.score)[0]);
+  }
+
   // Filet de sécurité : jamais moins de 3 vins. Si la tranche est trop pauvre pour ce plat,
-  // on prend les mieux accordés un peu hors tranche (le client en est averti).
+  // on prend les mieux accordés MOINS CHERS que la tranche (le client en est averti) :
+  // on ne dépasse jamais le plafond du client.
   let horsBudget = false;
   if (retenus.length < 3) {
     const deja = new Set(notes.map(n => n.wine.id));
-    const plafond = ouvert ? Infinity : budget.max * 1.6;
-    const cible = ouvert ? budget.min : budget.max;
+    const plafond = ouvert ? Infinity : budget.max;
+    const cible = budget.min;
     const extra = wines
       .filter(w => !deja.has(w.id) && w.price <= plafond && (couleurOk(w) || compromis))
       .map(w => Object.assign({ wine: w }, noter(w)))
@@ -924,12 +1032,14 @@ function candidatsGuides(wines, demande) {
     }
   }
   // Dernier repli (ex. apéritif « blanc doux » à moins de 8 €) : les vins de la couleur
-  // demandée compatibles avec le goût, à n'importe quel prix, les plus proches du budget.
-  if (retenus.length < 3) {
+  // demandée compatibles avec le goût, les plus proches du budget, d'abord sous le plafond ;
+  // au-dessus seulement si le rayon n'a vraiment rien d'autre (jamais de liste vide).
+  for (const plafondRepli of [ouvert ? Infinity : budget.max, Infinity]) {
+    if (retenus.length >= 3) break;
     const deja = new Set(retenus.map(n => n.wine.id));
     const cible = ouvert ? budget.min : budget.max;
     const extra = wines
-      .filter(w => !deja.has(w.id) && (couleurOk(w) || compromis))
+      .filter(w => !deja.has(w.id) && w.price <= plafondRepli && (couleurOk(w) || compromis))
       .map(w => Object.assign({ wine: w }, noter(w)))
       .filter(n => n.score > -99)
       .sort((a, b) => Math.abs(a.wine.price - cible) - Math.abs(b.wine.price - cible) || (b.score - a.score))
@@ -958,7 +1068,7 @@ function candidatsGuides(wines, demande) {
     }
   }
   const sousBudget = plancher < budget.min && retenus.some(n => n.wine.price < budget.min);
-  return { candidats: retenus.map(n => n.wine), notes: new Map(notes.map(n => [n.wine.id, n])), decouverte, compromis, horsBudget, sousBudget };
+  return { candidats: retenus.map(n => n.wine), notes: new Map(notes.map(n => [n.wine.id, n])), decouverte, compromis, horsBudget, sousBudget, belle };
 }
 
 
@@ -1002,25 +1112,22 @@ async function preparerSommelier(env) {
   console.log('🍽  Plat analysé:', decrirePlat(plat));
 
   const texteClient = messages.filter(m => m.role === 'user').map(m => m.content).join(' ');
-  const c = construireCandidats(catalogue, plat, budget, featuredSet, texteClient);
+  const c = construireCandidats(catalogue, plat, budget, featuredSet, texteClient, undefined, env.commercial);
   const tierWines = c.tierWines, available = c.available;
   if (c.decouverte) console.log('✨ Découverte proposée:', c.decouverte.name, '(' + c.decouverte.type + ')');
   const fmt = w => ligneCandidat(w, c.notes.get(w.id), featuredSet, c.decouverte);
 
   let inject = '\n\n>>> CONTRAINTES OBLIGATOIRES <<<';
-  if (budget && tierWines) {
-    const tiers = tierWines._tiers;
-    inject += '\nBUDGET MAXIMUM DE RÉFÉRENCE : ' + Math.round(budget.ref || budget.max) + '€ (annoncé par le client).';
-    inject += '\nSTRUCTURE DE PRIX OBLIGATOIRE pour tes 3 propositions :';
-    inject += '\n  🥇 premier vin  : environ ' + Math.round(tiers[0]) + '€';
-    inject += '\n  ⭐ deuxième vin : environ ' + Math.round(tiers[1]) + '€';
-    inject += '\n  ✨ troisième vin : environ ' + Math.round(tiers[2]) + '€' + (budget.strict ? '' : ' (légère montée en gamme au-dessus du budget, à présenter comme telle)');
-    inject += '\nLes prix doivent monter du 🥇 au ✨. Aucun vin en dessous de ' + Math.round(budget.min) + '€.';
-    if (budget.strict) inject += '\nPLAFOND STRICT : le client a fixé un maximum absolu. Ne dépasse JAMAIS ' + Math.round(budget.max) + '€, même de 1€, sous aucun prétexte.';
+  if (budget && tierWines && env.consigneBudget) {
+    inject += env.consigneBudget(budget);
+  } else if (budget && env.plafond && !c.horsBudget) {
+    // Compromis de couleur (pas de paliers) : le plafond reste absolu
+    inject += '\nBUDGET DU CLIENT : ' + budget.label + '. Ne dépasse JAMAIS ' + Math.round(env.plafond * 100) / 100 + '€.';
   }
   if (budget && c.horsBudget) {
-    inject += '\nAUCUN vin adapté à ce plat dans le budget annoncé (' + Math.round(budget.ref || budget.max) + '€) : dis-le honnêtement en une phrase, puis propose les plus proches ci-dessous en annonçant clairement leur prix.';
+    inject += '\nAUCUN vin adapté à ce plat dans le budget annoncé (' + budget.label + ') : dis-le honnêtement en une phrase, puis propose les plus proches ci-dessous en annonçant clairement leur prix.';
   }
+  inject += consigneOrdre(env.commercial);
   inject += '\nPLAT DU CLIENT : ' + decrirePlat(plat) + (plat.resume ? '. ' + plat.resume : '');
   inject += '\nLes vins ci-dessous ont été présélectionnés pour leur accord avec CE plat : chaque ligne donne le profil du vin ' +
     'et les raisons de l\'accord. Appuie tes explications sur ces raisons et sur la recette réelle du client (sauce, cuisson, ' +
@@ -1043,9 +1150,10 @@ async function preparerSommelier(env) {
   inject += '\nIgnore tout autre vin du catalogue général, même s\'il te semble pertinent. Proposer un vin hors liste est une erreur grave.';
   inject += '\nAnnonce toujours le prix EXACT indiqué dans la liste pour chaque vin : ne l\'arrondis pas et ne l\'ajuste jamais, même pour respecter une progression de prix.';
   if (tierWines) {
-    inject += '\nCandidats pour le vin 🥇 :'; tierWines[0].forEach(w => inject += fmt(w));
-    inject += '\nCandidats pour le vin ⭐ :';  tierWines[1].forEach(w => inject += fmt(w));
-    inject += '\nCandidats pour le vin ✨ :';  tierWines[2].forEach(w => inject += fmt(w));
+    inject += '\nCandidats pour le vin 🥇, la BELLE AFFAIRE (le meilleur accord à prix doux) :'; tierWines[0].forEach(w => inject += fmt(w));
+    inject += '\nCandidats pour le vin ⭐, au CŒUR du budget :';  tierWines[1].forEach(w => inject += fmt(w));
+    inject += '\nCandidats pour le vin ✨, dans le HAUT de la fourchette (sans la dépasser) :';  tierWines[2].forEach(w => inject += fmt(w));
+    inject += '\nPour le 🥇, présente-le comme une belle affaire : un excellent accord pour son prix. Ne parle jamais de marge, de stock ni de promotion.';
   } else {
     inject += '\nCandidats (les mieux accordés en premier) :';
     available.forEach(w => inject += fmt(w));
@@ -1071,13 +1179,32 @@ async function preparerSommelier(env) {
 // rôle (valeur sûre, coup de cœur, découverte), avec une raison courte.
 const OCCASIONS = ['aperitif', 'repas', 'offrir', 'cuisiner'];
 
+// ── Pertinence affichée au client ───────────────────────────────────────────
+// Un libellé en mots, calculé à partir de la note d'accord (ou de style, ou de
+// recette) : il qualifie l'accord avec LA recherche du client, jamais le vin en soi.
+// Seuils tirés de la répartition réelle des notes sur le catalogue de démo
+// (les 3 vins retenus : médiane autour de 80, 1 sur 10 au-dessus de 90).
+function niveauAccord(score, occasion, gout) {
+  const LIBELLES = {
+    repas:    ['Accord idéal', 'Très bon accord', 'Bon accord', 'Accord délicat'],
+    cuisiner: ['Idéal pour la recette', 'Très adapté à la recette', 'Adapté à la recette', 'Solution de dépannage'],
+    gouts:    ['Tout à fait vos goûts', 'Très proche de vos goûts', 'Proche de vos goûts', 'Un pas de côté'],
+    offrir:   ['Idéal à offrir', 'Très bon choix à offrir', 'Bon choix à offrir', 'Choix original'],
+  };
+  const l = occasion === 'repas' ? LIBELLES.repas
+    : occasion === 'cuisiner' ? LIBELLES.cuisiner
+    : occasion === 'offrir' && (!gout || gout === 'inconnu') ? LIBELLES.offrir
+    : LIBELLES.gouts;
+  return score >= 88 ? l[0] : score >= 75 ? l[1] : score >= 60 ? l[2] : l[3];
+}
+
 async function selectionGuidee(body, bracket, featuredSet, res, env) {
   const WINES_CATALOG = env.catalogue, callApi = env.callApi, CONFIG = env.config;
   const appelMistralTexte = msgs => appelMistral(callApi, CONFIG, msgs);
   const ACCORDS = module.exports;
   const occasion = OCCASIONS.includes(body.occasion) ? body.occasion : 'repas';
   const couleurs = ['rouge', 'blanc', 'rosé', 'bulles'];
-  const demande = { occasion, budget: bracket, couleur: couleurs.includes(body.couleur) ? body.couleur : null, featuredSet };
+  const demande = { occasion, budget: bracket, couleur: couleurs.includes(body.couleur) ? body.couleur : null, featuredSet, commercial: env.commercial };
   let contexte = '';
 
   if (occasion === 'repas') {
@@ -1178,7 +1305,13 @@ async function selectionGuidee(body, bracket, featuredSet, res, env) {
     const r = n && (n.plus.find(x => !generiques.includes(x)) || n.plus[0]);
     if (r) fallbackReasons[w.id] = r.charAt(0).toUpperCase() + r.slice(1);
   });
-  if (candidates.length < 3) return res.json({ ids: fallbackIds, roles: fallbackRoles, reasons: fallbackReasons, message: messageInfo });
+  // Libellé de pertinence de chaque vin proposé (voir niveauAccord)
+  const niveaux = ids => {
+    const out = {};
+    ids.forEach(id => { const n = c.notes.get(id); if (n) out[id] = niveauAccord(n.score, occasion, demande.gout); });
+    return out;
+  };
+  if (candidates.length < 3) return res.json({ ids: fallbackIds, roles: fallbackRoles, reasons: fallbackReasons, message: messageInfo, niveaux: niveaux(fallbackIds) });
 
   const system = 'Tu es le sommelier de la borne WineSelect, dans un magasin (sans prénom). Ton sobre, pédagogique et factuel : ' +
     'tu n\'incites jamais à consommer davantage et ne présentes jamais l\'alcool comme festif.\n' +
@@ -1186,16 +1319,20 @@ async function selectionGuidee(body, bracket, featuredSet, res, env) {
     (demande.couleur ? 'Le client a choisi : ' + demande.couleur + '.\n' : '') +
     'Budget choisi : ' + body.budget + '€.\n' +
     'Voici les vins présélectionnés pour lui (profil du vin et raisons de l\'accord) :' +
-    candidates.map(w => ACCORDS.ligneCandidat(w, c.notes.get(w.id), featuredSet, c.decouverte)).join('') +
+    candidates.map(w => ACCORDS.ligneCandidat(w, c.notes.get(w.id), featuredSet, c.decouverte, c.belle)).join('') +
     '\n\nChoisis EXACTEMENT 3 vins parmi ces IDs, de préférence parmi les mieux accordés, avec des profils ou des prix différents ' +
     'pour offrir un vrai choix, et des prix croissants du premier au troisième.\n' +
     (featuredSet.size ? 'En cas d\'ÉGALITÉ de pertinence, privilégie les vins [MIS EN AVANT PAR LE MAGASIN], mais jamais au détriment de l\'accord.\n' : '') +
+    (consigneOrdre(demande.commercial) ? consigneOrdre(demande.commercial).slice(1) + '\n' : '') +
     'Attribue à CHAQUE vin un rôle, chacun utilisé UNE SEULE fois :\n' +
     '  - "valeur_sure" : vin fiable, typique, bon rapport qualité-prix, le choix sans surprise.\n' +
     '  - "coup_de_coeur" : le meilleur accord, ou le plus séduisant.\n' +
     '  - "decouverte" : le plus original (cépage rare, région moins connue, style inattendu), quel que soit son prix.' +
     (c.decouverte ? ' Le vin marqué [DÉCOUVERTE] est d\'une autre couleur que celle qu\'on attendrait, avec un excellent accord : ' +
       'tu peux le retenir pour ce rôle, sans obligation.' : '') + '\n' +
+    (occasion !== 'cuisiner' ? 'Varie les prix dans la tranche : idéalement un vin au cœur de la tranche, un dans le haut de la tranche, et une belle affaire' +
+      (c.belle ? ' (le vin marqué [BELLE AFFAIRE] : le meilleur accord à prix doux, qui fait souvent une bonne "valeur_sure")' : ' (un excellent accord à prix doux)') +
+      ', sans jamais sacrifier l\'accord pour autant.\n' : '') +
     'Pour chaque vin, une raison courte (12 mots maximum), en français simple, sans jamais parler de note ni de score.\n' +
     (occasion === 'cuisiner'
       ? 'Dans "message", une phrase courte et utile sur la cuisson (par exemple : ce vin pourra aussi accompagner le plat à table).\n'
@@ -1252,7 +1389,7 @@ async function selectionGuidee(body, bracket, featuredSet, res, env) {
     }
     if (!validate(parsed)) {
       console.warn('⚠️  Parcours guidé toujours non conforme → sélection automatique');
-      return res.json({ ids: fallbackIds, roles: fallbackRoles, reasons: fallbackReasons, message: messageInfo });
+      return res.json({ ids: fallbackIds, roles: fallbackRoles, reasons: fallbackReasons, message: messageInfo, niveaux: niveaux(fallbackIds) });
     }
     console.log('✅ Parcours guidé →', parsed.ids.map(id => id + ':' + parsed.roles[id]).join(', '));
     // Les numéros internes (« ID:81 ») ne doivent jamais s'afficher : on les remplace par le nom du vin
@@ -1268,17 +1405,17 @@ async function selectionGuidee(body, bracket, featuredSet, res, env) {
     // Budget ou douceur : message écrit par le serveur à partir des vrais prix et profils
     // (l'IA s'y trompait : vin sec présenté comme demi-sec, prix « hors budget » qui ne l'était pas).
     if (!c.compromis && (c.horsBudget || c.sousBudget)) message = messageFaits(parsed.ids.map(id => WINES_CATALOG.find(w => w.id === id)).filter(Boolean), demande);
-    return res.json({ ids: parsed.ids, roles: parsed.roles, reasons: reasons, message: message });
+    return res.json({ ids: parsed.ids, roles: parsed.roles, reasons: reasons, message: message, niveaux: niveaux(parsed.ids) });
   } catch (e) {
     console.error('Erreur parcours guidé:', e.message, '→ sélection automatique');
-    return res.json({ ids: fallbackIds, roles: fallbackRoles, reasons: fallbackReasons, message: messageInfo });
+    return res.json({ ids: fallbackIds, roles: fallbackRoles, reasons: fallbackReasons, message: messageInfo, niveaux: niveaux(fallbackIds) });
   }
 }
 
 module.exports = {
+  STRATEGIES, bonusStrategie, consigneOrdre,
   analyserPlat, noterVin, choisirDecouverte, construireCandidats, ligneCandidat,
-  decrireProfil, decrirePlat, nettoyer, REGLAGES,
+  decrireProfil, decrirePlat, nettoyer, REGLAGES, APPELLATIONS_RENOM, notorieteAppellation,
   platDepuisCategorie, noterStyle, noterRecette, analyserRecette, candidatsGuides, GOUTS, RECETTES,
-  appelMistral, preparerSommelier, selectionGuidee, couleursConseillees,
-  definirStrategie, profilerVin,
+  appelMistral, preparerSommelier, selectionGuidee, couleursConseillees, niveauAccord,
 };

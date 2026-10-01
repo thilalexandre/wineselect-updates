@@ -38,7 +38,7 @@ try {
 } catch(e) {}
 // Cohérence budget/prix : la tranche affichée découle TOUJOURS du prix réel,
 // pour que la sélection guidée ne propose jamais un vin hors du budget choisi.
-const budgetForPrice = p => p<=8 ? '-8' : p<=15 ? '8-15' : p<=25 ? '15-25' : '25+';
+const budgetForPrice = p => p<=8 ? '-8' : p<=15 ? '8-15' : p<=25 ? '15-25' : p<=50 ? '25-50' : '50+';
 WINES.forEach(w=>{ w.budget = budgetForPrice(w.price); });
 
 // ── Fiche produit : nom affiché, ligne de détails, photo, emplacement ────────
@@ -314,7 +314,8 @@ const BUDGETS=[
   {id:'-8',   label:'Moins de 8€', desc:'Plaisir quotidien'},
   {id:'8-15', label:'8 – 15€',     desc:'Qualité accessible'},
   {id:'15-25',label:'15 – 25€',    desc:'Belles découvertes'},
-  {id:'25+',  label:'25€ et plus', desc:'Grands moments'},
+  {id:'25-50',label:'25 – 50€',    desc:'Grands moments'},
+  {id:'50+',  label:'50€ et plus', desc:"Cuvées d'exception"},
 ];
 const PAIRINGS=[
   {id:'viande',        label:'Viande'},
@@ -547,14 +548,14 @@ function filterWines(type, budget, pairing) {
     (!pairing || (w.pairings||[]).includes(pairing))
   );
 
-  if (budget === '25+') {
-    // Tranche sans plafond : 3 paliers progressifs (accessible ~35€ /
-    // milieu ~55€ / haut de gamme ~100€) pour ne jamais proposer d'entrée
-    // un grand cru très cher a un client qui a juste dit "plus de 25€".
+  if (budget === '50+') {
+    // Tranche sans plafond : 3 paliers progressifs (accessible ~60€ /
+    // milieu ~80€ / haut de gamme ~130€) pour ne jamais proposer d'entrée
+    // un grand cru très cher a un client qui a juste dit "plus de 50€".
     const tiers = [
-      { max: 40, target: 35 },
-      { max: 70, target: 55 },
-      { max: Infinity, target: 100 },
+      { max: 70, target: 60 },
+      { max: 100, target: 80 },
+      { max: Infinity, target: 130 },
     ];
     const rankOf = price => tiers.findIndex(t => price <= t.max);
     const used = new Set();
@@ -1532,8 +1533,8 @@ function Selection({setView, setResults}) {
           <div>
             {titre('Quel est votre budget ?')}
             <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:12}}>
-              {BUDGETS.map(b => (
-                <div key={b.id} onClick={() => pickBudget(b.id)} style={{background:budget === b.id ? C.soft : C.cream, border:'1px solid ' + (budget === b.id ? C.wine : C.bord), borderRadius:16, padding:'22px 14px', minHeight:104, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', textAlign:'center', cursor:'pointer', transition:'border-color .3s'}}
+              {BUDGETS.map((b, i) => (
+                <div key={b.id} onClick={() => pickBudget(b.id)} style={{gridColumn:(i === BUDGETS.length - 1 && BUDGETS.length % 2) ? '1 / -1' : 'auto', background:budget === b.id ? C.soft : C.cream, border:'1px solid ' + (budget === b.id ? C.wine : C.bord), borderRadius:16, padding:'22px 14px', minHeight:104, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', textAlign:'center', cursor:'pointer', transition:'border-color .3s'}}
                   onMouseEnter={e => e.currentTarget.style.borderColor = C.wine}
                   onMouseLeave={e => { if (budget !== b.id) e.currentTarget.style.borderColor = C.bord; }}>
                   <div style={{...serif, fontSize:26, fontWeight:600, color:C.wine, marginBottom:6, lineHeight:1}}>{b.label}</div>
@@ -2389,7 +2390,7 @@ function Admin({setView}) {
               </div>
               <div style={{background:C.cream,border:'1px solid '+C.bord,borderRadius:11,padding:'13px'}}>
                 <div style={{...serif,fontSize:14,color:C.wine,marginBottom:10}}>Par budget</div>
-                {[['-8','moins de 8€'],['8-15','8-15€'],['15-25','15-25€'],['25+','25€+']].map(([id,l])=>{
+                {[['-8','moins de 8€'],['8-15','8-15€'],['15-25','15-25€'],['25-50','25-50€'],['50+','50€+']].map(([id,l])=>{
                   const cnt=localWines.filter(w=>w.budget===id).length;
                   const pct=Math.round(cnt/localWines.length*100);
                   return <div key={id} style={{marginBottom:7}}>
@@ -2433,7 +2434,7 @@ function Admin({setView}) {
                     <div key={w.id} style={{display:'flex',alignItems:'center',gap:8,background:'#fff',border:'1px solid '+C.bord,borderRadius:8,padding:'6px 10px'}}>
                       <div style={{flex:1,minWidth:0}}>
                         <div style={{fontSize:12,fontWeight:600,color:C.wine,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{w.name}</div>
-                        <div style={{fontSize:10,color:C.muted}}>{w.stock} bouteilles · {w.price}€ · tranche {w.budget==='25+'?'25€+':w.budget+'€'}</div>
+                        <div style={{fontSize:10,color:C.muted}}>{w.stock} bouteilles · {w.price}€ · tranche {w.budget==='50+'?'50€+':w.budget+'€'}</div>
                       </div>
                       <button onClick={()=>applySuggestion(w)} style={{background:C.gold,color:'#fff',border:'none',borderRadius:50,padding:'5px 12px',fontSize:11,cursor:'pointer',fontFamily:'Montserrat,sans-serif',fontWeight:600,flexShrink:0}}>✓ Mettre en avant</button>
                     </div>
@@ -2451,7 +2452,7 @@ function Admin({setView}) {
                 ))}
               </div>
               <div style={{display:'flex',gap:5,flexWrap:'wrap',alignItems:'center'}}>
-                {[['all','Tous'],['-8','moins de 8€'],['8-15','8-15€'],['15-25','15-25€'],['25+','25€+']].map(([id,l])=>(
+                {[['all','Tous'],['-8','moins de 8€'],['8-15','8-15€'],['15-25','15-25€'],['25-50','25-50€'],['50+','50€+']].map(([id,l])=>(
                   <button key={id} onClick={()=>setBudgetFilter(id)} style={{background:budgetFilter===id?'rgba(212,175,55,.2)':C.cream,color:budgetFilter===id?C.light:C.muted,border:'1.5px solid '+(budgetFilter===id?C.gold:C.bord),borderRadius:50,padding:'4px 10px',fontSize:11,cursor:'pointer',fontFamily:'Montserrat,sans-serif'}}>{l}</button>
                 ))}
                 <select value={sortBy} onChange={e=>setSortBy(e.target.value)} style={{marginLeft:'auto',background:C.bg,border:'1px solid '+C.bord,borderRadius:50,padding:'4px 10px',fontSize:11,color:C.text,cursor:'pointer',fontFamily:'Montserrat,sans-serif',outline:'none'}}>
@@ -2481,7 +2482,7 @@ function Admin({setView}) {
                   {expanded===w.id&&(
                     <div style={{borderTop:'1px solid '+C.bord,padding:'11px 13px',background:'rgba(212,175,55,.03)'}}>
                       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:7,marginBottom:9}}>
-                        {[['Appellation',w.appellation||'-'],['Cépage',w.grape||'-'],['Stock',w.stock+' bouteilles'],['Budget',w.budget==='25+'?'25€+':w.budget+'€'],
+                        {[['Appellation',w.appellation||'-'],['Cépage',w.grape||'-'],['Stock',w.stock+' bouteilles'],['Budget',w.budget==='50+'?'50€+':w.budget+'€'],
                           ["Prix d'achat", prixAchat[w.id] ? fmtEuro(prixAchat[w.id]) : 'non renseigné'],
                           ['Marge brute', margeDe(w)!==null ? fmtEuro(margeDe(w)) + ' (' + Math.round(margeDe(w) / w.price * 100) + ' % du prix)' : '—'],
                           ['Domaine', w.domaine||'non renseigné'], ['Cuvée', w.cuvee||'non renseignée'], ['Millésime', w.millesime||'non renseigné'],
