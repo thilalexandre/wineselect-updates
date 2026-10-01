@@ -450,7 +450,7 @@ function construireCandidats(wines, d, budget, featuredSet, texteClient, aleatoi
 // Ligne d'un candidat dans le prompt de Gabriel
 function ligneCandidat(w, note, featuredSet, decouverte) {
   const raisons = note ? note.plus.slice(0, 3).join(' ; ') : '';
-  return '\n  ID:' + w.id + ' | ' + w.name + ' | ' + w.type + ' | ' + w.price + '€ | ' + (w.region || '') +
+  return '\n  ID:' + w.id + ' | ' + (w.libelle || w.name) + ' | ' + w.type + ' | ' + w.price + '€ | ' + (w.region || '') +
     ' | profil : ' + decrireProfil(w) +
     (note ? ' | accord ' + Math.min(100, note.score) + '/100' + (raisons ? ' : ' + raisons : '') : '') +
     (featuredSet && featuredSet.has(w.id) ? ' | [MIS EN AVANT PAR LE MAGASIN]' : '') +

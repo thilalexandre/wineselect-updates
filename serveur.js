@@ -276,7 +276,36 @@ function loadCatalog() {
 // BASE_CATALOG pour produire WINES_CATALOG. Appelé au démarrage et après
 // chaque import CSV / mise en avant depuis Admin > Config, pour que Gabriel
 // voie immédiatement les nouveaux prix/stocks sans redémarrer le serveur.
+// ── Identité des vins (libellé) ─────────────────────────────────────────────
+// Même règle que libelleVin() dans WineSelect.html — les deux doivent rester
+// identiques pour que le sommelier écrive les noms affichés à l'écran.
+const CHAMPS_FICHE = ['domaine', 'cuvee', 'millesime', 'photo', 'emplacement'];
+function libelleVin(w) {
+  if (!w) return '';
+  if (!w.domaine && !w.cuvee) return w.millesime ? w.name + ' ' + w.millesime : w.name;
+  let s = w.domaine && w.cuvee ? w.domaine + ' — ' + w.cuvee : (w.cuvee || w.domaine);
+  if (w.appellation && s.toLowerCase().indexOf(String(w.appellation).toLowerCase()) < 0) s += ', ' + w.appellation;
+  if (w.millesime) s += ' ' + w.millesime;
+  return s;
+}
+// Après l'application des stocks/prix : recopie les champs de fiche importés
+// par l'admin et calcule le libellé de chaque vin du catalogue serveur.
+function enrichirFiches() {
+  const overrides = readJSON('stock-overrides', []);
+  const byId = new Map((Array.isArray(overrides) ? overrides : []).map(o => [o.id, o]));
+  WINES_CATALOG = WINES_CATALOG.map(w => {
+    const o = byId.get(w.id);
+    const x = Object.assign({}, w);
+    if (o) CHAMPS_FICHE.forEach(k => { if (o[k] != null && String(o[k]).trim()) x[k] = String(o[k]).trim(); });
+    x.libelle = libelleVin(x);
+    return x;
+  });
+}
 function applyStockOverrides() {
+  applyStockOverridesBase();
+  try { enrichirFiches(); } catch (e) { console.warn('⚠️  Libellés des vins non calculés :', e.message); }
+}
+function applyStockOverridesBase() {
   const overrides = readJSON('stock-overrides', []);
   if (!Array.isArray(overrides) || !overrides.length) {
     WINES_CATALOG = BASE_CATALOG;
@@ -539,7 +568,7 @@ app.post('/sommelier', rateLimit(30), async (req, res) => {
     if (available.length >= 3) {
       inject += '\nVINS DISPONIBLES — RÈGLE ABSOLUE : tes 3 propositions doivent EXCLUSIVEMENT provenir de ces listes.';
       inject += '\nIgnore tout autre vin du catalogue général, même s\'il te semble pertinent. Proposer un vin hors liste est une erreur grave.';
-      const fmt = w => '\n  ID:' + w.id + ' | ' + w.name + ' | ' + w.type + ' | ' + w.price + '€ | ' + w.region + ' | Note:' + w.rating +
+      const fmt = w => '\n  ID:' + w.id + ' | ' + (w.libelle || w.name) + ' | ' + w.type + ' | ' + w.price + '€ | ' + w.region + ' | Note:' + w.rating +
         (featuredSet.has(w.id) ? ' | [MIS EN AVANT PAR LE MAGASIN]' : '');
       if (tierWines) {
         inject += '\nCandidats pour le vin 🥇 :'; tierWines[0].forEach(w => inject += fmt(w));
@@ -787,7 +816,7 @@ app.post('/selection-accord', rateLimit(30), async (req, res) => {
     return res.json({ ids: fallbackIds, roles: fallbackRoles, reasons: {} });
   }
 
-  const fmt = w => '\n  ID:' + w.id + ' | ' + w.name + ' | ' + w.price + '€ | ' + w.region +
+  const fmt = w => '\n  ID:' + w.id + ' | ' + (w.libelle || w.name) + ' | ' + w.price + '€ | ' + w.region +
     ' | cépage: ' + w.grape + ' | note:' + w.rating + ' | dégustation: ' + w.tastingNotes +
     (featuredSet.has(w.id) ? ' | [MIS EN AVANT PAR LE MAGASIN]' : '');
 
