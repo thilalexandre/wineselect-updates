@@ -18,7 +18,9 @@ const { useState, useEffect, useRef, useCallback, useMemo } = React;
 const WINES = window.WINES_DATA;
 // Version allégée du catalogue pour le sommelier : reconstruite depuis WINES si le fichier
 // du catalogue ne la fournit pas (sinon l'application ne démarre pas).
-const CATALOG = window.CATALOG_DATA || (WINES || []).map(w => ({id:w.id, name:w.name, type:w.type, price:w.price, region:w.region, grape:w.grape, pairings:w.pairings, rating:w.rating}));
+// Catalogue envoyé au sommelier : champs objectifs seulement (une ancienne note /100 du
+// catalogue du magasin n'est jamais transmise)
+const CATALOG = (window.CATALOG_DATA || WINES || []).map(w => ({id:w.id, name:w.name, type:w.type, price:w.price, region:w.region, grape:w.grape, pairings:w.pairings}));
 // Application des stocks/prix importés via CSV (admin)
 try {
   const ov = JSON.parse(localStorage.getItem('ws_stock_overrides')||'[]');
@@ -194,7 +196,7 @@ const ROLE_LABELS = {
 const DEFAULT_ROLE_ORDER = ['valeur_sure','coup_de_coeur','decouverte']; // dernier recours si aucun rôle n'est dispo
 
 // Mise en avant "sélection" côté magasin — un choix commercial assumé, distinct de
-// la note /100 : le gérant décide, avec une raison affichée pour rester
+// l'accord calculé : le gérant décide, avec une raison affichée pour rester
 // transparent envers le client (pas un jugement de qualité déguisé).
 const FEATURED_REASONS = {
   stock:              "Stock à découvrir",
@@ -203,6 +205,15 @@ const FEATURED_REASONS = {
   saison:             "Sélection de saison",
 };
 const DEFAULT_FEATURED_LABEL = "Sélection du magasin";
+
+// Stratégie de recommandation choisie par le gérant (Admin > Config). Elle ne fait
+// que départager des vins également bien accordés : le conseil reste honnête.
+const STRATEGIES_RECO = [
+  {id:'neutre', label:'Neutre', desc:'Uniquement la pertinence : le meilleur accord, au cœur du budget du client.'},
+  {id:'panier', label:'Panier moyen', desc:'À pertinence égale, les vins du haut de la fourchette de prix du client.'},
+  {id:'marge',  label:'Marge', desc:"À pertinence égale, la marge brute en euros la plus élevée (prix d'achat à importer)."},
+  {id:'stock',  label:'Écouler le stock', desc:'À pertinence égale, les vins dont le stock est le plus élevé.'},
+];
 
 const TYPES=[
   {id:'rouge',  label:'Rouge',  desc:'Tanins et caractère',     color:'#6B2635', bg:'#fbeaec'},
@@ -266,12 +277,10 @@ const PAIRING_DETAILS = {
     {id:'bleu', label:'Bleu (roquefort)'},
   ],
 };
-const getRarity = r => r>=95
-  ? {label:'Exceptionnel', color:'#9c7a3e', accent:'#d8bd84', dot:'#b08d4f'}
-  : r>=90 ? {label:'Grand cru',    color:'#7d5e2a', accent:'#cdb583', dot:'#9c7a3e'}
-  : r>=85 ? {label:'Belle cuvée',  color:'#6b4020', accent:'#d4b896', dot:'#b08060'}
-  : r>=80 ? {label:'Recommandé',   color:'#5a2030', accent:'#c09090', dot:'#8b5060'}
-  :         {label:'À découvrir',  color:'#6a5a32', accent:'#cbbd8e', dot:'#9c8a4e'};
+// Habillage des cartes : le même pour tous les vins. Il n'y a plus de note de qualité
+// propre à un vin (subjective) : la seule appréciation affichée est l'accord avec la
+// recherche du client (wine.accord, calculé par le moteur d'accords).
+const CARTE_STYLE = {color:'#7d5e2a', accent:'#cdb583', dot:'#b08d4f', bg:'#9c7a3e'};
 
 // ── BOTTLE ILLUSTRATION ───────────────────────────────────────────────────────
 const BOTTLE = {
@@ -421,6 +430,27 @@ function Bottle({wine, h=150, label=true}) {
   );
 }
 
+// Profils gustatifs (corps, tanins, fraîcheur...) calculés par le serveur, pour le repli
+// local de la sélection guidée. Vide si le serveur ne répond pas : le repli trie alors par prix.
+let PROFILS_VINS = {};
+fetch('http://localhost:3000/profils-vins').then(r => r.json()).then(p => { PROFILS_VINS = p || {}; }).catch(() => {});
+// Goût choisi → corps visé (1 léger, 2 rond, 3 ample)
+const GOUT_CORPS = {
+  leger_frais:1, rouge_leger:1, blanc_vif:1, rose_pale:1, bulles_vives:1,
+  fruite_gourmand:2, rouge_rond:2, blanc_aromatique:2, rose_fruite:2, bulles_fruitees:2,
+  riche_intense:3, rouge_puissant:3, blanc_beurre:3, rose_vineux:3, bulles_vineuses:3,
+};
+const GOUTS_SUCRES = ['doux', 'blanc_moelleux', 'rose_tendre', 'bulles_douces'];
+function noteGoutLocale(w, gout) {
+  const p = PROFILS_VINS[w.id];
+  if (!p) return -50;
+  if (GOUTS_SUCRES.includes(gout)) return p.sucrosite * 10;
+  const cible = GOUT_CORPS[gout] || 2;
+  let s = -Math.abs(p.corps - cible) * 10 - p.sucrosite * 5;
+  if (cible === 1) s += (p.fraicheur === 3 ? 5 : 0) - (p.tanins >= 2 ? 10 : 0) - (p.boise >= 2 ? 5 : 0);
+  return s;
+}
+
 function filterWines(type, budget, pairing) {
   let results = WINES.filter(w =>
     (!type    || w.type === type) &&
@@ -444,20 +474,16 @@ function filterWines(type, budget, pairing) {
       const pool = results.filter(w => rankOf(w.price) === i && !used.has(w.id));
       pool.sort((a, b) => {
         const da = Math.abs(a.price - t.target), db = Math.abs(b.price - t.target);
-        if (Math.abs(da - db) > 5) return da - db;
-        return b.rating - a.rating;
+        return da - db;
       });
       if (pool.length) { ladder.push(pool[0]); used.add(pool[0].id); }
     });
     const rest = results.filter(w => !used.has(w.id))
-      .sort((a, b) => (a.price - b.price) || (b.rating - a.rating));
+      .sort((a, b) => a.price - b.price);
     results = [...ladder, ...rest];
   } else {
-    // Sort by price DESC first (push towards top of budget range), then by rating
-    results.sort((a, b) => {
-      if (Math.abs(a.price - b.price) > 3) return b.price - a.price;
-      return b.rating - a.rating;
-    });
+    // Haut de la fourchette d'abord (règle budget)
+    results.sort((a, b) => b.price - a.price);
   }
 
   return results;
@@ -655,24 +681,23 @@ function useMic(onResult) {
 // ── API ───────────────────────────────────────────────────────────────────────
 const SYS_PROMPT = `Tu es Gabriel, sommelier dans une borne de supermarché. Tu parles simplement, sur un ton pédagogique et factuel : tu décris l'origine, le cépage, le terroir, l'élaboration et les accords mets-vins. Tu n'incites JAMAIS à consommer davantage, tu ne présentes jamais l'alcool comme festif, valorisant ou lié à la réussite, et tu peux rappeler que l'abus d'alcool est dangereux pour la santé.
 
-BUDGET — RÈGLE ABSOLUE (escalier de prix basé sur le MAXIMUM annoncé) :
-🥇 premier vin ≈ 80% du budget maximum · ⭐ deuxième vin ≈ 100% · ✨ troisième vin ≈ 120% (montée en gamme, à présenter comme telle).
-Exemple : "entre 15 et 20€" → 🥇 ~16€, ⭐ ~20€, ✨ ~24€.
-Si le client fixe un plafond strict ("80€ grand maximum"), ne le dépasse JAMAIS : 🥇 ~80%, ⭐ ~90%, ✨ au plafond.
-Ne propose JAMAIS un vin en dessous de 80% du maximum annoncé.
+BUDGET — RÈGLE ABSOLUE : tu restes TOUJOURS dans la fourchette du client, tu ne la dépasses jamais.
+Les 3 prix montent du bas vers le haut de sa fourchette. Exemple : "entre 30 et 50€" → 🥇 ~35€, ⭐ ~42€, ✨ ~50€, et aucun vin au-dessus de 52,50€.
+S'il ne donne qu'un plafond ("moins de 20€"), la fourchette va de 70% du plafond au plafond (14 à 20€).
+Les contraintes de budget ajoutées plus bas par le serveur priment sur cet exemple.
 
 FORMAT DE RÉPONSE — STRICTEMENT CE FORMAT, RIEN D'AUTRE :
 
 [Phrase d'intro courte et chaleureuse qui montre que tu as compris le plat/l'occasion]
 
 🥇 [Nom du vin] — [Prix]€
-[2 lignes max : pourquoi ce vin va parfaitement avec le plat, en mots simples et concrets]
+[2 lignes max : la belle affaire — un excellent accord avec le plat pour un prix doux, en mots simples et concrets]
 
 ⭐ [Nom du vin] — [Prix]€
-[2 lignes max : pourquoi ce vin se distingue objectivement — terroir, élaboration, rapport qualité-prix]
+[2 lignes max : au cœur de son budget — pourquoi ce vin va avec le plat et se distingue objectivement : terroir, élaboration]
 
 ✨ [Nom du vin] — [Prix]€
-[2 lignes max : la montée en gamme — ce que ce vin apporte de plus, factuellement : terroir, élaboration, profondeur]
+[2 lignes max : le haut de sa fourchette — ce que ce vin apporte de plus, factuellement : terroir, élaboration, profondeur]
 
 [WINES:id1,id2,id3]
 
@@ -680,7 +705,8 @@ RÈGLES :
 - 2 lignes maximum par vin, pas plus
 - Langage simple, pas de jargon
 - Chaque description doit mentionner un élément concret du plat du client
-- Les prix montent toujours du 🥇 au ✨ : 🥇 le plus accessible, ⭐ au niveau du budget, ✨ le plus haut de gamme
+- Les prix montent toujours du 🥇 au ✨ : 🥇 la belle affaire (le meilleur accord à prix doux), ⭐ au cœur du budget, ✨ le haut de la fourchette, sans jamais la dépasser
+- Ne parle jamais de marge, de stock ni de promotion
 - TOUJOURS terminer par [WINES:id1,id2,id3]
 
 CATALOGUE (${CATALOG.length} vins) : ${JSON.stringify(CATALOG)}`;
@@ -737,7 +763,7 @@ function localFallback(msg) {
   if (range) { minP = parseInt(range[1]); maxP = parseInt(range[2]); }
   else if (floorOpen) { minP = parseInt(floorOpen[1]); maxP = minP * 3; }
   else if (capped) { maxP = parseInt(capped[1]); minP = Math.round(maxP*0.7); }
-  else if (exact) { const p = parseInt(exact[1]); minP = Math.round(p*0.8); maxP = Math.round(p*1.2); }
+  else if (exact) { const p = parseInt(exact[1]); minP = Math.round(p*0.7); maxP = p; }
 
   // Filet de sécurité : si aucun budget n'est détecté du tout, on plafonne
   // par défaut à une fourchette grand public, sauf intention premium explicite.
@@ -745,7 +771,7 @@ function localFallback(msg) {
   if (maxP === null && !premiumIntent) { maxP = 45; minP = 0; }
 
   let pool = WINES.filter(w => (maxP===null || w.price<=maxP) && w.price>=minP);
-  if (!pool.length) pool = [...WINES].filter(w => maxP===null || w.price <= maxP*1.5);
+  if (!pool.length) pool = [...WINES].filter(w => maxP===null || w.price <= maxP*1.05); // jamais au-dessus du budget
   if (!pool.length) pool = [...WINES];
 
   if (/\brosé\b/.test(m)) pool=pool.filter(w=>w.type==='rosé');
@@ -753,7 +779,7 @@ function localFallback(msg) {
   else if (/\bblanc\b/.test(m)) pool=pool.filter(w=>w.type==='blanc');
   else if (/\brouge\b/.test(m)) pool=pool.filter(w=>w.type==='rouge');
 
-  return {text:`Voici ma sélection${maxP?' autour de '+maxP+'€':''}. Retournez les cartes pour les détails !`, wines:pool.sort((a,b)=>b.rating-a.rating).slice(0,3)};
+  return {text:`Voici ma sélection${maxP?' autour de '+maxP+'€':''}. Retournez les cartes pour les détails !`, wines:pool.sort((a,b)=>b.price-a.price).slice(0,3)};
 }
 
 // ── SHARED UI ─────────────────────────────────────────────────────────────────
@@ -774,19 +800,10 @@ function GoldLine() {
   return <div style={{height:1, background:`linear-gradient(90deg,transparent,${C.gold},transparent)`, margin:'12px 0'}}/>;
 }
 
-function QualityBadge({rarity, compact=false}) {
-  return (
-    <div style={{display:'flex', alignItems:'center', gap:4}}>
-      <div style={{width:compact?5:6, height:compact?5:6, borderRadius:'50%', background:rarity.dot, flexShrink:0}}/>
-      <span style={{fontSize:compact?8:9, fontWeight:600, color:rarity.color, letterSpacing:'.04em'}}>{rarity.label}</span>
-    </div>
-  );
-}
-
 // ── WINE COLLECTOR CARD ───────────────────────────────────────────────────────
 function WineCard({wine, owned=0, onCollect, compact=false, onClick}) {
   const [flipped, setFlipped] = useState(false);
-  const rarity  = getRarity(wine.rating);
+  const rarity  = CARTE_STYLE;
   const typeInfo = TYPES.find(t=>t.id===wine.type) || TYPES[0];
   const W = compact ? 132 : 174;
   const H = compact ? 206 : 280;
@@ -812,17 +829,16 @@ function WineCard({wine, owned=0, onCollect, compact=false, onClick}) {
           {/* Filet couleur type */}
           <div style={{height:3, background:`linear-gradient(90deg,${typeInfo.color},${rarity.dot})`, flexShrink:0}}/>
 
-          {/* Bandeau sélection — choix commercial du magasin, distinct de la note */}
+          {/* Bandeau sélection — choix commercial du magasin, distinct de l'accord */}
           {wine.featured && (
             <div style={{position:'absolute', top:compact?24:28, right:-1, background:C.wine, color:'#fdf8f0', fontSize:compact?7:8, fontWeight:700, letterSpacing:'.03em', padding:compact?'2px 7px':'3px 9px', borderRadius:'50px 0 0 50px', boxShadow:'0 2px 6px rgba(94,22,34,.25)', zIndex:1, maxWidth:'62%', textAlign:'right', textOverflow:'ellipsis', overflow:'hidden', whiteSpace:'nowrap'}}>
               {FEATURED_REASONS[wine.featuredReason] || DEFAULT_FEATURED_LABEL}
             </div>
           )}
 
-          {/* Ligne type + qualité */}
+          {/* Ligne type */}
           <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', padding:compact?'7px 9px 0':'9px 12px 0'}}>
             <span style={{fontSize:compact?8:9, fontWeight:700, color:typeInfo.color, textTransform:'uppercase', letterSpacing:'.12em'}}>{wine.type}</span>
-            <QualityBadge rarity={rarity} compact={compact}/>
           </div>
 
           {/* Scène bouteille */}
@@ -841,11 +857,11 @@ function WineCard({wine, owned=0, onCollect, compact=false, onClick}) {
             <div style={{fontSize:compact?8.5:9.5, color:C.muted, marginTop:1}}>{wine.region}</div>
           </div>
 
-          {/* Pied prix + note */}
+          {/* Pied prix + accord */}
           <div style={{marginTop:'auto', display:'flex', alignItems:'flex-end', justifyContent:'space-between', padding:compact?'6px 9px 8px':'8px 12px 10px'}}>
             <span style={{...serif, fontSize:compact?17:21, fontWeight:700, color:C.wine, lineHeight:1}}>{wine.price}€</span>
             <div style={{textAlign:'right'}}>
-              <div style={{fontSize:compact?8:9, color:C.light, fontWeight:600, letterSpacing:'.02em'}}>★ {wine.rating}<span style={{opacity:.5}}>/100</span></div>
+              {wine.accord && <div style={{fontSize:compact?8:9, color:C.gold2, fontWeight:600, letterSpacing:'.02em'}}>{wine.accord}</div>}
               {owned>0 && <div style={{fontSize:8, color:C.wine, fontWeight:700, marginTop:1}}>dans ma cave ×{owned}</div>}
             </div>
           </div>
@@ -865,10 +881,9 @@ function WineCard({wine, owned=0, onCollect, compact=false, onClick}) {
           {/* Filet couleur type (rappel du recto) */}
           <div style={{height:3, background:`linear-gradient(90deg,${typeInfo.color},${rarity.dot})`, flexShrink:0}}/>
 
-          {/* En-tête : type + niveau */}
+          {/* En-tête : type */}
           <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', padding:compact?'6px 9px 0':'8px 12px 0'}}>
             <span style={{fontSize:compact?7.5:8.5, fontWeight:700, color:rarity.dot, textTransform:'uppercase', letterSpacing:'.14em'}}>{wine.type}</span>
-            <span style={{fontSize:compact?7.5:8.5, fontWeight:600, color:'rgba(253,248,240,.55)', letterSpacing:'.06em'}}>{rarity.label}</span>
           </div>
 
           {/* Nom + origine */}
@@ -904,12 +919,12 @@ function WineCard({wine, owned=0, onCollect, compact=false, onClick}) {
             </div>
           </div>
 
-          {/* Pied : prix + note + action */}
+          {/* Pied : prix + accord + action */}
           <div style={{marginTop:'auto', padding:compact?'6px 9px 8px':'8px 12px 10px'}}>
             <div style={{height:1, background:`linear-gradient(90deg,transparent,${rarity.dot},transparent)`, marginBottom:compact?5:7, opacity:.85}}/>
             <div style={{display:'flex', justifyContent:'space-between', alignItems:'flex-end', marginBottom:onCollect?(compact?5:7):0}}>
               <span style={{...serif, fontSize:compact?15:19, fontWeight:700, color:'#fdf8f0', lineHeight:1}}>{wine.price}€</span>
-              <div style={{fontSize:compact?8:9, color:rarity.dot, fontWeight:700}}>★ {wine.rating}<span style={{color:'rgba(253,248,240,.45)', fontWeight:500}}>/100</span></div>
+              {wine.accord && <div style={{fontSize:compact?8:9, color:rarity.dot, fontWeight:700}}>{wine.accord}</div>}
             </div>
             {onCollect && (
               <button onClick={e=>{e.stopPropagation();onCollect(wine);}} style={{
@@ -930,18 +945,18 @@ function WineCard({wine, owned=0, onCollect, compact=false, onClick}) {
 // ── MODAL ─────────────────────────────────────────────────────────────────────
 function WineModal({wine, onClose, onCollect}) {
   if (!wine) return null;
-  const rarity = getRarity(wine.rating);
+  const rarity = CARTE_STYLE;
   return (
     <div style={{position:'fixed',inset:0,background:'rgba(58,16,8,.65)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:300,padding:16,backdropFilter:'blur(4px)'}} onClick={onClose}>
       <div style={{background:C.cream,borderRadius:20,border:`1px solid ${C.bord2}`,padding:26,maxWidth:400,width:'100%',maxHeight:'88vh',overflowY:'auto',boxShadow:'0 24px 64px rgba(58,16,8,.3)'}} onClick={e=>e.stopPropagation()}>
         <div style={{textAlign:'center',marginBottom:14}}>
           <div style={{display:'flex',justifyContent:'center',marginBottom:4,filter:'drop-shadow(0 7px 16px rgba(94,22,34,.22))'}}><Bottle wine={wine} h={132}/></div>
-          <span style={{background:rarity.bg,color:'#fff',borderRadius:50,padding:'3px 14px',fontSize:10,fontWeight:600,textShadow:'0 1px 2px rgba(0,0,0,.3)'}}>{rarity.label}</span>
+          {wine.accord && <span style={{background:rarity.bg,color:'#fff',borderRadius:50,padding:'3px 14px',fontSize:10,fontWeight:600,textShadow:'0 1px 2px rgba(0,0,0,.3)'}}>{wine.accord}</span>}
           <div style={{...serif,fontSize:22,color:C.wine,fontWeight:700,margin:'10px 0 4px',lineHeight:1.2}}>{wine.name}</div>
           <div style={{fontSize:13,color:C.light}}>{wine.region} · {wine.appellation}</div>
         </div>
         <GoldLine/>
-        {[['Cépage',wine.grape],['Prix',wine.price+'€'],['Note',wine.rating+'/100'],['Stock',wine.stock+' bouteilles']].map(([k,v]) =>
+        {[['Cépage',wine.grape],['Prix',wine.price+'€']].concat(wine.accord?[['Pour votre recherche',wine.accord]]:[]).concat([['Stock',wine.stock+' bouteilles']]).map(([k,v]) =>
           <div key={k} style={{display:'flex',justifyContent:'space-between',fontSize:13,marginBottom:9,alignItems:'center'}}>
             <span style={{color:C.muted}}>{k}</span>
             <span style={{color:C.wine,fontWeight:600}}>{v}</span>
@@ -1236,9 +1251,9 @@ function Selection({setView, setResults}) {
   // ── Repli local si le serveur ne répond pas ──────────────────────────────
   const withFallbackRoles = wines => {
     if (wines.length < 3) return wines;
-    const byRating = [...wines].sort((a,b) => b.rating - a.rating);
-    const roles = {[byRating[0].id]:'valeur_sure'};
-    const rest = wines.filter(w => w.id !== byRating[0].id);
+    const byPrice = [...wines].sort((a,b) => a.price - b.price);
+    const roles = {[byPrice[0].id]:'valeur_sure'};
+    const rest = wines.filter(w => w.id !== byPrice[0].id);
     roles[rest[0].id] = 'coup_de_coeur';
     roles[rest[1].id] = 'decouverte';
     return wines.map(w => ({...w, aiRole: roles[w.id]}));
@@ -1247,7 +1262,12 @@ function Selection({setView, setResults}) {
     const rec = RECETTES_UI.find(x => x.id === o.recette);
     const type = o.couleur || (o.occasion === 'cuisiner' && rec ? rec.couleur : null);
     const p = o.occasion === 'repas' ? o.pairing : o.occasion === 'aperitif' ? 'apéritif' : null;
-    let r = filterWines(type, o.budget, p).slice(0,3);
+    // Apéritif et cadeau avec un goût précis : les vins les plus proches de ce goût, à prix croissants
+    const parGout = (o.occasion === 'aperitif' || o.occasion === 'offrir') && o.gout && o.gout !== 'inconnu' && Object.keys(PROFILS_VINS).length;
+    let r = parGout
+      ? filterWines(type, o.budget, null).map((w, i) => ({w: w, i: i, s: noteGoutLocale(w, o.gout)}))
+          .sort((a, b) => (b.s - a.s) || (a.i - b.i)).slice(0,3).map(x => x.w).sort((a, b) => a.price - b.price)
+      : filterWines(type, o.budget, p).slice(0,3);
     if (r.length < 3) { const e = filterWines(type, o.budget, null).filter(w => !r.find(x => x.id === w.id)); r = [...r, ...e].slice(0,3); }
     if (r.length < 3) { const e = filterWines(type, null, null).filter(w => !r.find(x => x.id === w.id)); r = [...r, ...e].slice(0,3); }
     return withFallbackRoles(r);
@@ -1277,10 +1297,11 @@ function Selection({setView, setResults}) {
         if (!r.length) r = localFallback(o);
         else if (d.roles && r.every(w => d.roles[w.id])) r = r.map(w => ({...w, aiReason:(d.reasons||{})[w.id], aiRole:d.roles[w.id]}));
         else r = withFallbackRoles(r).map(w => ({...w, aiReason:(d.reasons||{})[w.id]}));
+        r = r.map(w => ({...w, accord:(d.niveaux||{})[w.id]}));
         r.message = d.message || '';
         setResults(r); setView('results');
       })
-      .catch(() => { setResults(localFallback(o)); setView('results'); });
+      .catch(e => { console.warn('Sélection guidée : repli local (' + e.message + ')'); setResults(localFallback(o)); setView('results'); });
   };
 
   // ── Éléments d'interface ─────────────────────────────────────────────────
@@ -1489,80 +1510,114 @@ function Results({results, setView, collector}) {
   const [modal, setModal] = useState(null);
   const [added, setAdded] = useState(null);
   const handleCollect = wine => { collector.addWine(wine.id); setAdded(wine.id); setTimeout(()=>setAdded(null),2500); };
-  // Le libellé vient du rôle réel du vin (aiRole, assigné par Gabriel ou par
+  // Le libellé vient du rôle réel du vin (aiRole, assigné par le sommelier ou par
   // l'heuristique de repli) — jamais de sa position dans le tableau. Le
-  // DEFAULT_ROLE_ORDER n'est qu'un ultime filet de sécurité si aucun rôle
-  // n'a pu être calculé (ne devrait normalement jamais arriver).
+  // DEFAULT_ROLE_ORDER n'est qu'un ultime filet de sécurité.
   const labelFor = (w,i) => ROLE_LABELS[w.aiRole] || ROLE_LABELS[DEFAULT_ROLE_ORDER[i]] || '';
-  const isCoupDeCoeur = w => w.aiRole ? w.aiRole==='coup_de_coeur' : false;
-  const bgFor     = w => isCoupDeCoeur(w) ? '#fef9ed' : C.cream;
-  const borderFor = w => isCoupDeCoeur(w) ? C.bord2 : C.bord;
+
+  // Palette « ivoire épuré » (direction B) — locale à cet écran pour l'instant
+  const IV = {bg:'#faf6ee', surface:'#ffffff', soft:'#f3ece0', line:'#e6dccb', line2:'#c9b99f',
+              ink:'#2a1215', body:'#4d3a35', muted:'#6e5a50', wine:'#5e1622', gold:'#8a6a2e'};
+  const sans = {fontFamily:'Montserrat,sans-serif'};
+  const caps = (size, color, extra) => Object.assign({fontSize:size, letterSpacing:'.18em', textTransform:'uppercase', color:color}, extra||{});
+  const prix = p => String(p).replace('.', ',') + ' €';
+  const enCave = w => added===w.id || (collector.collection[w.id]||0) > 0;
+
+  const BoutonCave = ({w, small}) => (
+    <button onClick={e=>{e.stopPropagation(); handleCollect(w);}}
+      style={{...sans, minHeight:small?40:52, padding:small?'0 14px':'0 22px', background:enCave(w)?IV.soft:'transparent', border:'1px solid '+(enCave(w)?IV.line2:IV.wine), borderRadius:999, color:IV.wine, fontSize:small?12:14, fontWeight:500, cursor:'pointer', whiteSpace:'nowrap'}}>
+      {added===w.id ? '✓ Ajouté à ma cave' : enCave(w) ? '✓ Dans ma cave' : 'Garder dans ma cave'}
+    </button>
+  );
 
   if (!results.length) return (
-    <div style={{minHeight:'100vh',background:C.bg}}>
-      <Header title="Résultats" onBack={()=>setView('selection')}/>
-      <div style={{textAlign:'center',padding:'60px 24px'}}>
-        <div style={{fontSize:52}}>😕</div>
-        <h2 style={{...serif,color:C.wine,margin:'14px 0 8px'}}>Aucun vin ne correspond</h2>
-        <div style={{display:'flex',gap:12,justifyContent:'center',marginTop:20,flexWrap:'wrap'}}>
-          <button onClick={()=>setView('selection')} style={{background:C.wine,color:'#fdf8f0',border:'none',borderRadius:50,padding:'10px 22px',cursor:'pointer',fontFamily:'Montserrat,sans-serif'}}>Réessayer</button>
-          <button onClick={()=>setView('chat')} style={{background:C.cream,color:C.wine,border:'1.5px solid '+C.bord2,borderRadius:50,padding:'10px 22px',cursor:'pointer',fontFamily:'Montserrat,sans-serif'}}>Sommelier IA</button>
+    <div style={{minHeight:'100vh', background:IV.bg, color:IV.ink}}>
+      <div style={{textAlign:'center', padding:'90px 28px'}}>
+        <h2 style={{...serif, fontSize:34, fontWeight:500, color:IV.ink, margin:'0 0 10px'}}>Aucun vin ne correspond</h2>
+        <p style={{fontSize:14, color:IV.muted, marginBottom:26}}>Essayez un autre budget, ou décrivez votre plat au sommelier.</p>
+        <div style={{display:'flex', gap:12, justifyContent:'center', flexWrap:'wrap'}}>
+          <button onClick={()=>setView('selection')} style={{...sans, minHeight:52, padding:'0 26px', background:IV.wine, color:IV.bg, border:'none', borderRadius:999, fontSize:14, fontWeight:600, cursor:'pointer'}}>Réessayer</button>
+          <button onClick={()=>setView('chat')} style={{...sans, minHeight:52, padding:'0 26px', background:'transparent', color:IV.ink, border:'1px solid '+IV.line2, borderRadius:999, fontSize:14, cursor:'pointer'}}>Demander au sommelier</button>
         </div>
       </div>
     </div>
   );
 
+  // Le vin mis en avant : le coup de cœur s'il existe, sinon le vin du milieu
+  const heroIdx = Math.max(0, results.findIndex(w => w.aiRole === 'coup_de_coeur'));
+  const hero = results[heroIdx >= 0 ? heroIdx : 0];
+  const autres = results.map((w,i)=>({w:w, i:i})).filter(x => x.w.id !== hero.id);
+  const nb = results.length;
+
   return (
-    <div style={{minHeight:'100vh', background:C.bg}}>
-      <Header title="Nos recommandations" subtitle="Retournez les cartes pour les détails" onBack={()=>setView('selection')}/>
-      <div style={{maxWidth:520, margin:'0 auto', padding:'20px 16px'}}>
-        <div style={{textAlign:'center', marginBottom:20}}>
-          <div style={{display:'flex',alignItems:'center',justifyContent:'center',gap:10,marginBottom:6}}>
-            <span style={{width:38,height:1,background:`linear-gradient(90deg,transparent,${C.gold})`}}></span>
-            <span style={{width:6,height:6,transform:'rotate(45deg)',background:C.gold}}></span>
-            <span style={{width:38,height:1,background:`linear-gradient(90deg,${C.gold},transparent)`}}></span>
+    <div style={{minHeight:'100vh', background:IV.bg, color:IV.ink, paddingBottom:96}}>
+      {/* En-tête */}
+      <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', padding:'22px 24px 18px', borderBottom:'1px solid '+IV.line}}>
+        <button onClick={()=>setView('selection')} style={{...sans, display:'flex', alignItems:'center', gap:8, minHeight:46, padding:'0 18px 0 12px', background:'transparent', border:'1px solid '+IV.line2, borderRadius:999, color:IV.ink, fontSize:13, letterSpacing:'.04em', cursor:'pointer'}}>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>
+          Retour
+        </button>
+        <div style={{...serif, fontSize:22, fontWeight:600, color:IV.wine, letterSpacing:'.02em'}}>WineSelect</div>
+        <div style={{width:96}}/>
+      </div>
+
+      <div style={{padding:'0 24px'}}>
+        {/* Titre */}
+        <div style={{padding:'32px 0 0'}}>
+          <div style={caps(11, IV.gold, {letterSpacing:'.24em', marginBottom:10})}>Votre sélection</div>
+          <h1 style={{...serif, margin:0, fontSize:'clamp(2.2rem,6vw,3.1rem)', fontWeight:500, lineHeight:1.04, letterSpacing:'-.01em', color:IV.ink}}>
+            {nb===3 ? 'Trois vins choisis pour vous' : nb===2 ? 'Deux vins choisis pour vous' : 'Le vin choisi pour vous'}
+          </h1>
+          {results.message && <p style={{margin:'14px 0 0', fontSize:13, lineHeight:1.6, color:IV.body, background:IV.soft, borderRadius:12, padding:'10px 14px'}}>{results.message}</p>}
+        </div>
+
+        {/* Vin principal */}
+        <div onClick={()=>setModal(hero)} style={{marginTop:26, display:'flex', gap:24, padding:24, background:IV.surface, border:'1px solid '+IV.line, borderRadius:20, boxShadow:'0 18px 40px rgba(94,22,34,.08)', cursor:'pointer'}}>
+          <div style={{flexShrink:0, width:140, minHeight:280, borderRadius:12, background:IV.soft, display:'flex', alignItems:'center', justifyContent:'center'}}>
+            <Bottle wine={hero} h={210} label={false}/>
           </div>
-          <h2 style={{...serif, fontSize:'clamp(1.4rem,3.5vw,1.9rem)', color:C.wine, margin:'8px 0 4px'}}>Sélection personnalisée</h2>
-          <p style={{fontSize:12, color:C.muted}}>Cliquez sur une carte pour la retourner · Collectionnez après achat</p>
-          {results.message && <div style={{margin:'10px auto 0', maxWidth:420, background:'#fef9ed', border:'1px solid '+C.bord2, borderRadius:10, padding:'8px 12px', fontSize:12, color:C.wine, lineHeight:1.5}}>💡 {results.message}</div>}
-        </div>
-        <div style={{display:'flex', justifyContent:'center', gap:12, marginBottom:22, flexWrap:'wrap'}}>
-          {results.map((w,i) => (
-            <div key={w.id} style={{textAlign:'center'}}>
-              <div style={{fontSize:10, color:C.light, fontWeight:600, marginBottom:6, textTransform:'uppercase', letterSpacing:'.05em'}}>{labelFor(w,i)}</div>
-              <WineCard wine={w} owned={collector.collection[w.id]||0} onCollect={handleCollect}/>
-              {added===w.id && <div style={{marginTop:6, fontSize:11, color:C.gold, fontWeight:600}}>✓ Collecté !</div>}
+          <div style={{flex:1, minWidth:0, display:'flex', flexDirection:'column', gap:12}}>
+            <div style={{display:'flex', alignItems:'center', gap:9, ...caps(11, IV.wine, {fontWeight:600, letterSpacing:'.2em'})}}>
+              <span style={{width:7, height:7, background:IV.wine, transform:'rotate(45deg)'}}/>
+              {labelFor(hero, heroIdx)}
             </div>
-          ))}
-        </div>
-        <div style={{display:'flex', flexDirection:'column', gap:8, marginBottom:22}}>
-          {results.map((w,i) => (
-            <div key={w.id} onClick={()=>setModal(w)} style={{background:bgFor(w), border:'1.5px solid '+borderFor(w), borderRadius:13, padding:'11px 14px', cursor:'pointer', transition:'all .2s', boxShadow:'0 2px 8px rgba(107,31,42,.06)'}}
-              onMouseEnter={e=>{e.currentTarget.style.borderColor=C.gold;e.currentTarget.style.transform='translateX(4px)';}}
-              onMouseLeave={e=>{e.currentTarget.style.borderColor=borderFor(w);e.currentTarget.style.transform='translateX(0)';}}>
-              <div style={{display:'flex', alignItems:'center', gap:10}}>
-                <Bottle wine={w} h={48} label={false}/>
-                <div style={{flex:1}}>
-                  <div style={{fontSize:10, color:C.light, fontWeight:600, textTransform:'uppercase', letterSpacing:'.04em', marginBottom:2}}>{labelFor(w,i)}</div>
-                  <div style={{...serif, fontSize:15, fontWeight:700, color:C.wine}}>{w.name}</div>
-                  <div style={{fontSize:11, color:C.muted}}>{w.region} · {w.grape}</div>
-                  {(w.aiReason || w.tastingNotes) && (
-                    <div style={{fontSize:11, color:C.wine, fontStyle:'italic', marginTop:4, lineHeight:1.35}}>
-                      🍷 {w.aiReason || w.tastingNotes}
-                    </div>
-                  )}
-                </div>
-                <div style={{textAlign:'right', flexShrink:0}}>
-                  <div style={{...serif, fontSize:20, fontWeight:700, color:C.wine}}>{w.price}€</div>
-                  <div style={{fontSize:10, color:C.light}}>{w.rating}/100</div>
-                </div>
+            <h2 style={{...serif, margin:0, fontSize:'clamp(1.8rem,5vw,2.5rem)', fontWeight:600, lineHeight:1.04, color:IV.ink}}>{hero.name}</h2>
+            <div style={caps(11, IV.muted, {letterSpacing:'.14em'})}>{hero.region}{hero.grape ? ' · ' + hero.grape : ''}</div>
+            <div style={{height:1, background:IV.line}}/>
+            {(hero.aiReason || hero.tastingNotes) && <p style={{...serif, margin:0, fontStyle:'italic', fontSize:19, lineHeight:1.4, color:'#3f2a26'}}>{hero.aiReason || hero.tastingNotes}</p>}
+            <div style={{marginTop:'auto', display:'flex', alignItems:'flex-end', justifyContent:'space-between', gap:12, flexWrap:'wrap', paddingTop:6}}>
+              <div style={{display:'flex', flexDirection:'column', gap:5}}>
+                {hero.accord && <span style={caps(10, IV.gold)}>{hero.accord}</span>}
+                <span style={{...serif, fontSize:46, fontWeight:600, lineHeight:.9, color:IV.wine}}>{prix(hero.price)}</span>
               </div>
+              <BoutonCave w={hero}/>
             </div>
-          ))}
+          </div>
         </div>
-        <div style={{display:'flex', gap:10, justifyContent:'center', flexWrap:'wrap'}}>
-          <button onClick={()=>setView('home')} style={{background:C.wine,color:'#fdf8f0',border:'none',borderRadius:50,padding:'10px 22px',cursor:'pointer',fontFamily:'Montserrat,sans-serif',fontSize:13}}>Nouvelle recherche</button>
-          <button onClick={()=>setView('chat')} style={{background:C.cream,color:C.wine,border:'1.5px solid '+C.bord2,borderRadius:50,padding:'10px 22px',cursor:'pointer',fontFamily:'Montserrat,sans-serif',fontSize:13}}>Poser une question</button>
+
+        {/* Autres vins */}
+        {autres.length>0 && (
+          <div style={{marginTop:16, display:'grid', gridTemplateColumns:autres.length>1?'repeat(2, minmax(0, 1fr))':'1fr', gap:16}}>
+            {autres.map(({w,i})=>(
+              <div key={w.id} onClick={()=>setModal(w)} style={{display:'flex', flexDirection:'column', gap:10, padding:20, background:IV.surface, border:'1px solid '+IV.line, borderRadius:16, cursor:'pointer'}}>
+                <div style={caps(10, IV.gold, {fontWeight:600, letterSpacing:'.2em'})}>{labelFor(w,i)}</div>
+                <h3 style={{...serif, margin:0, fontSize:24, fontWeight:600, lineHeight:1.08, color:IV.ink}}>{w.name}</h3>
+                <div style={caps(10, IV.muted, {letterSpacing:'.12em'})}>{w.region}{w.grape ? ' · ' + w.grape : ''}</div>
+                {(w.aiReason || w.tastingNotes) && <p style={{margin:0, fontSize:13, lineHeight:1.6, color:IV.body}}>{w.aiReason || w.tastingNotes}</p>}
+                <div style={{marginTop:'auto', display:'flex', alignItems:'baseline', justifyContent:'space-between', paddingTop:6}}>
+                  <span style={{...serif, fontSize:32, fontWeight:600, color:IV.wine}}>{prix(w.price)}</span>
+                  {w.accord && <span style={{fontSize:11, color:IV.muted}}>{w.accord}</span>}
+                </div>
+                <BoutonCave w={w} small={true}/>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Actions */}
+        <div style={{marginTop:28, display:'flex', gap:12, flexWrap:'wrap'}}>
+          <button onClick={()=>setView('home')} style={{...sans, flex:1, minWidth:200, minHeight:58, background:IV.wine, border:'none', borderRadius:999, color:IV.bg, fontSize:15, fontWeight:600, letterSpacing:'.03em', cursor:'pointer'}}>Nouvelle recherche</button>
+          <button onClick={()=>setView('chat')} style={{...sans, flex:1, minWidth:200, minHeight:58, background:'transparent', border:'1px solid '+IV.line2, borderRadius:999, color:IV.ink, fontSize:15, cursor:'pointer'}}>Demander au sommelier</button>
         </div>
       </div>
       {modal && <WineModal wine={modal} onClose={()=>setModal(null)} onCollect={()=>{handleCollect(modal);setModal(null);}}/>}
@@ -1575,7 +1630,7 @@ function Mystery({setView, collector}) {
   const [wine,  setWine]  = useState(null);
   const [added, setAdded] = useState(false);
   const reveal = () => {
-    const pool = WINES.filter(w=>w.rating>=84&&w.price<=30);
+    const pool = WINES.filter(w=>w.price>=8&&w.price<=30);
     setWine(pool[Math.floor(Math.random()*pool.length)]);
     setAdded(false);
   };
@@ -1688,7 +1743,6 @@ function Chat({setView, collector, customer}) {
                         </div>
                         <div style={{textAlign:'right',flexShrink:0}}>
                           <div style={{...serif,fontSize:17,fontWeight:700,color:C.wine}}>{w.price}€</div>
-                          <div style={{fontSize:9,color:C.light}}>{w.rating}/100</div>
                         </div>
                       </div>
                       <div style={{display:'flex',gap:4,flexWrap:'wrap'}}>
@@ -1730,7 +1784,7 @@ function SanteBanner() {
   return (
     <div style={{position:'fixed', left:0, right:0, bottom:0, zIndex:500, background:'#2d0c13', borderTop:'1px solid rgba(176,141,79,.45)', padding:'4px 10px', textAlign:'center'}}>
       <div style={{fontSize:9.5, fontWeight:700, color:'#fbf3e3', letterSpacing:'.08em'}}>L'ABUS D'ALCOOL EST DANGEREUX POUR LA SANTÉ — À CONSOMMER AVEC MODÉRATION</div>
-      <div style={{fontSize:8, color:'rgba(251,243,227,.6)', marginTop:1}}>Vente d'alcool interdite aux mineurs · Notes /100 attribuées par la cave Wine Select</div>
+      <div style={{fontSize:8, color:'rgba(251,243,227,.6)', marginTop:1}}>Vente d'alcool interdite aux mineurs</div>
     </div>
   );
 }
@@ -1920,13 +1974,34 @@ function Admin({setView}) {
   const [search,       setSearch]       = useState('');
   const [typeFilter,   setTypeFilter]   = useState('all');
   const [budgetFilter, setBudgetFilter] = useState('all');
-  const [sortBy,       setSortBy]       = useState('rating');
+  const [sortBy,       setSortBy]       = useState('name');
   const [expanded,     setExpanded]     = useState(null);
   const [editWine,     setEditWine]     = useState(null);
   const [localWines,   setLocalWines]   = useState(WINES);
   const [notif,        setNotif]        = useState(null);
 
   const notify = (msg, type='success') => { setNotif({msg,type}); setTimeout(()=>setNotif(null),3000); };
+
+  // ── Stratégie de recommandation (enregistrée sur le serveur, qui l'applique seul) ──
+  const [strategie, setStrategie] = useState('neutre');
+  useEffect(() => {
+    fetch('/api/config-reco').then(r => r.json()).then(d => { if (d && d.strategie) setStrategie(d.strategie); }).catch(() => {});
+  }, []);
+  // ── Prix d'achat (confidentiels) : lus et écrits sur le serveur avec le PIN admin,
+  // gardés en mémoire le temps de la session admin, JAMAIS dans localStorage.
+  const [prixAchat, setPrixAchat] = useState({});
+  useEffect(() => {
+    fetch('/api/prix-achat', {headers:{'X-Admin-Token': ADMIN_TOKEN || ''}})
+      .then(r => r.ok ? r.json() : {}).then(d => setPrixAchat(d || {})).catch(() => {});
+  }, []);
+  const margeDe = w => { const pa = prixAchat[w.id]; return typeof pa === 'number' && pa > 0 ? w.price - pa : null; };
+  const fmtEuro = v => (Math.round(v * 100) / 100).toFixed(2).replace('.', ',') + '€';
+
+  const choisirStrategie = s => {
+    setStrategie(s);
+    syncToServerAdmin('config-reco', {strategie: s});
+    notify('Stratégie enregistrée : ' + (STRATEGIES_RECO.find(x => x.id === s) || {}).label);
+  };
 
   // ── Suggestions "surstock" ───────────────────────────────────────────────
   // Le stock brut n'est pas comparable entre tranches (un vin à 6€ a
@@ -1969,7 +2044,6 @@ function Admin({setView}) {
     if (search){const s=norm(search);return norm(w.name).includes(s)||norm(w.region).includes(s)||norm(w.grape).includes(s);}
     return true;
   }).sort((a,b)=>{
-    if(sortBy==='rating')    return b.rating-a.rating;
     if(sortBy==='price_desc')return b.price-a.price;
     if(sortBy==='price_asc') return a.price-b.price;
     if(sortBy==='stock_asc') return a.stock-b.stock;
@@ -1977,13 +2051,13 @@ function Admin({setView}) {
     return 0;
   });
 
-  const avgRating=(localWines.reduce((s,w)=>s+w.rating,0)/localWines.length).toFixed(1);
+  const nbSelection=localWines.filter(w=>w.featured).length;
   const avgPrice=(localWines.reduce((s,w)=>s+w.price,0)/localWines.length).toFixed(0);
   const lowStock=localWines.filter(w=>w.stock<10).length;
   const totalValue=localWines.reduce((s,w)=>s+w.price*w.stock,0).toLocaleString('fr-FR');
   const byType={rouge:0,blanc:0,rosé:0,bulles:0};
   localWines.forEach(w=>{if(byType[w.type]!==undefined)byType[w.type]++;});
-  const topRated=[...localWines].sort((a,b)=>b.rating-a.rating).slice(0,5);
+  const topStock=[...localWines].sort((a,b)=>b.stock-a.stock).slice(0,5);
   const topPriced=[...localWines].sort((a,b)=>b.price-a.price).slice(0,5);
   const lowStockW=[...localWines].filter(w=>w.stock<10).sort((a,b)=>a.stock-b.stock);
 
@@ -2025,6 +2099,16 @@ function Admin({setView}) {
   };
 
   // Import de stock via fichier CSV (export Excel : id;nom;stock;prix ou id;stock)
+  // Modèle CSV pré-rempli avec le catalogue actuel (séparateur ; et virgule décimale,
+  // comme Excel en français) : le gérant n'a plus qu'à compléter stocks et prix d'achat.
+  const telechargerModeleCSV = () => {
+    const dec = v => (v===null || v===undefined || v==='') ? '' : String(v).replace('.', ',');
+    const lignes = ['id;nom;stock;prix;prix_achat'].concat(localWines.map(w =>
+      [w.id, String(w.name).replace(/;/g, ','), w.stock, dec(w.price), dec(prixAchat[w.id])].join(';')));
+    const blob = new Blob(['﻿' + lignes.join('\n')], {type:'text/csv;charset=utf-8'});
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'modele-stock-wineselect.csv'; a.click();
+  };
+
   const handleCSVImport = (file) => {
     if (!file) return;
     const reader = new FileReader();
@@ -2034,24 +2118,44 @@ function Admin({setView}) {
         const lines = text.split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
         if (!lines.length) { notify('Fichier vide','error'); return; }
         const sep = lines[0].includes(';') ? ';' : (lines[0].includes('\t') ? '\t' : ',');
+        const split = line => line.split(sep).map(c=>c.trim().replace(/^"|"$/g,''));
+        const num = v => { const n = parseFloat(String(v==null?'':v).replace(',','.').replace(/[€\s]/g,'')); return isNaN(n) ? null : n; };
+        // En-tête facultatif : s'il existe, les colonnes sont repérées par leur nom
+        // (id, stock, prix, prix_achat), dans n'importe quel ordre. Sinon, ordre
+        // du modèle : id;nom;stock;prix;prix_achat (ou simplement id;stock).
+        const entete = split(lines[0]).map(h=>h.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[\s-]+/g,'_'));
+        const avecEntete = isNaN(parseInt(entete[0]));
+        const col = nom => entete.indexOf(nom);
+        const idx = avecEntete
+          ? {id:col('id'), stock:col('stock'), prix:col('prix'), pa:Math.max(col('prix_achat'), col('prixachat'))}
+          : null;
+        const lignes = [];
+        (avecEntete ? lines.slice(1) : lines).forEach(line=>{
+          const c=split(line);
+          const id=parseInt(c[idx ? idx.id : 0]); if(!id||isNaN(id)) return;
+          if (idx) lignes.push({id, stock: idx.stock>=0 ? parseInt(c[idx.stock]) : NaN, prix: idx.prix>=0 ? num(c[idx.prix]) : null, pa: idx.pa>=0 ? num(c[idx.pa]) : null});
+          else lignes.push({id, stock: parseInt(c.length>=3 ? c[2] : c[1]), prix: c.length>=4 ? num(c[3]) : null, pa: c.length>=5 ? num(c[4]) : null});
+        });
         let updated=0, priced=0;
+        const achats = {};
+        const connus = new Set(localWines.map(w=>w.id));
+        lignes.forEach(l=>{ if(connus.has(l.id) && l.pa!==null && l.pa>0) achats[l.id]=l.pa; });
         setLocalWines(prev=>{
           const next=[...prev];
-          lines.forEach(line=>{
-            const cols=line.split(sep).map(c=>c.trim().replace(/^"|"$/g,''));
-            const id=parseInt(cols[0]); if(!id||isNaN(id)) return;
-            const i=next.findIndex(w=>w.id===id); if(i<0) return;
+          lignes.forEach(l=>{
+            const i=next.findIndex(w=>w.id===l.id); if(i<0) return;
             const w={...next[i]};
-            const stockCol = cols.length>=3 ? cols[2] : cols[1];
-            const stock=parseInt(stockCol);
-            if(!isNaN(stock)){ w.stock=stock; updated++; }
-            if(cols.length>=4){ const price=parseFloat(String(cols[3]).replace(',','.')); if(!isNaN(price)){ w.price=price; w.budget=budgetForPrice(price); priced++; } }
+            if(!isNaN(l.stock)){ w.stock=l.stock; updated++; }
+            if(l.prix!==null && l.prix>0){ w.price=l.prix; w.budget=budgetForPrice(l.prix); priced++; }
             next[i]=w;
           });
           try{ persistOverrides(next); }catch(e){}
           return next;
         });
-        setTimeout(()=>{ updated>0 ? notify(updated+' stock'+(updated>1?'s':'')+' mis à jour'+(priced?' · '+priced+' prix actualisés':'')) : notify('Aucune ligne reconnue — vérifiez les colonnes (id;nom;stock;prix)','error'); }, 60);
+        // Prix d'achat : envoyés au serveur seulement (fusion), jamais dans localStorage
+        const nbAchats = Object.keys(achats).length;
+        if (nbAchats) { syncToServerAdmin('prix-achat', achats); setPrixAchat(p=>Object.assign({}, p, achats)); }
+        setTimeout(()=>{ (updated>0||nbAchats>0) ? notify(updated+' stock'+(updated>1?'s':'')+' mis à jour'+(priced?' · '+priced+' prix actualisés':'')+(nbAchats?' · '+nbAchats+" prix d'achat":'')) : notify('Aucune ligne reconnue — vérifiez les colonnes (id;nom;stock;prix;prix_achat)','error'); }, 60);
       } catch(err) { notify('Fichier illisible — enregistrez-le en CSV depuis Excel','error'); }
     };
     reader.readAsText(file, 'utf-8');
@@ -2074,7 +2178,7 @@ function Admin({setView}) {
           <div>
             <div style={{...serif,fontSize:19,color:C.wine,marginBottom:14}}>Vue d'ensemble</div>
             <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:9,marginBottom:16}}>
-              {[['Références',localWines.length,'🍷'],['Note moy.',avgRating+'/100','⭐'],['Prix moy.',avgPrice+'€','💰'],['Alertes',lowStock,'⚠️']].map(([l,v,i])=>(
+              {[['Références',localWines.length,'🍷'],['Sélection',nbSelection,'⭐'],['Prix moy.',avgPrice+'€','💰'],['Alertes',lowStock,'⚠️']].map(([l,v,i])=>(
                 <div key={l} style={{background:C.cream,border:'1px solid '+(l==='Alertes'&&lowStock>0?'#f5c6cb':C.bord),borderRadius:11,padding:'12px 8px',textAlign:'center'}}>
                   <div style={{fontSize:20}}>{i}</div>
                   <div style={{...serif,fontSize:18,fontWeight:700,color:l==='Alertes'&&lowStock>0?'#b91c1c':C.wine}}>{v}</div>
@@ -2108,12 +2212,12 @@ function Admin({setView}) {
             </div>
             <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
               <div style={{background:C.cream,border:'1px solid '+C.bord,borderRadius:11,padding:'13px'}}>
-                <div style={{...serif,fontSize:14,color:C.wine,marginBottom:9}}>🏆 Top 5 notes</div>
-                {topRated.map((w,i)=><div key={w.id} style={{display:'flex',alignItems:'center',gap:7,padding:'4px 0',borderBottom:i<4?'1px solid '+C.bord:'none'}}>
+                <div style={{...serif,fontSize:14,color:C.wine,marginBottom:9}}>📦 Plus gros stocks</div>
+                {topStock.map((w,i)=><div key={w.id} style={{display:'flex',alignItems:'center',gap:7,padding:'4px 0',borderBottom:i<4?'1px solid '+C.bord:'none'}}>
                   <span style={{fontSize:10,fontWeight:700,color:C.gold,width:14}}>{i+1}</span>
                   <Bottle wine={w} h={34} label={false}/>
                   <div style={{flex:1,minWidth:0}}><div style={{fontSize:11,fontWeight:600,color:C.wine,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{w.name}</div><div style={{fontSize:10,color:C.muted}}>{w.price}€</div></div>
-                  <span style={{fontSize:11,color:C.light,fontWeight:700}}>{w.rating}</span>
+                  <span style={{fontSize:11,color:C.light,fontWeight:700}}>{w.stock}</span>
                 </div>)}
               </div>
               <div style={{background:C.cream,border:'1px solid '+C.bord,borderRadius:11,padding:'13px'}}>
@@ -2162,7 +2266,6 @@ function Admin({setView}) {
                   <button key={id} onClick={()=>setBudgetFilter(id)} style={{background:budgetFilter===id?'rgba(212,175,55,.2)':C.cream,color:budgetFilter===id?C.light:C.muted,border:'1.5px solid '+(budgetFilter===id?C.gold:C.bord),borderRadius:50,padding:'4px 10px',fontSize:11,cursor:'pointer',fontFamily:'Montserrat,sans-serif'}}>{l}</button>
                 ))}
                 <select value={sortBy} onChange={e=>setSortBy(e.target.value)} style={{marginLeft:'auto',background:C.bg,border:'1px solid '+C.bord,borderRadius:50,padding:'4px 10px',fontSize:11,color:C.text,cursor:'pointer',fontFamily:'Montserrat,sans-serif',outline:'none'}}>
-                  <option value="rating">Note ↓</option>
                   <option value="price_desc">Prix ↓</option>
                   <option value="price_asc">Prix ↑</option>
                   <option value="stock_asc">Stock ↑</option>
@@ -2182,14 +2285,16 @@ function Admin({setView}) {
                     </div>
                     <div style={{display:'flex',alignItems:'center',gap:7,flexShrink:0}}>
                       {w.stock<10&&<span style={{fontSize:9,background:'#f8d7da',color:'#721c24',borderRadius:50,padding:'2px 6px',fontWeight:600}}>⚠️{w.stock}</span>}
-                      <div style={{textAlign:'right'}}><div style={{...serif,fontSize:14,fontWeight:700,color:C.wine}}>{w.price}€</div><div style={{fontSize:9,color:C.light}}>{w.rating}/100</div></div>
+                      <div style={{textAlign:'right'}}><div style={{...serif,fontSize:14,fontWeight:700,color:C.wine}}>{w.price}€</div><div style={{fontSize:9,color:C.light}}>{w.stock} btl{margeDe(w)!==null ? ' · marge ' + fmtEuro(margeDe(w)) : ''}</div></div>
                       <span style={{color:C.light,fontSize:10,transition:'transform .2s',display:'inline-block',transform:expanded===w.id?'rotate(180deg)':'none'}}>▼</span>
                     </div>
                   </div>
                   {expanded===w.id&&(
                     <div style={{borderTop:'1px solid '+C.bord,padding:'11px 13px',background:'rgba(212,175,55,.03)'}}>
                       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:7,marginBottom:9}}>
-                        {[['Appellation',w.appellation||'-'],['Cépage',w.grape||'-'],['Stock',w.stock+' bouteilles'],['Budget',w.budget==='25+'?'25€+':w.budget+'€']].map(([k,v])=>(
+                        {[['Appellation',w.appellation||'-'],['Cépage',w.grape||'-'],['Stock',w.stock+' bouteilles'],['Budget',w.budget==='25+'?'25€+':w.budget+'€'],
+                          ["Prix d'achat", prixAchat[w.id] ? fmtEuro(prixAchat[w.id]) : 'non renseigné'],
+                          ['Marge brute', margeDe(w)!==null ? fmtEuro(margeDe(w)) + ' (' + Math.round(margeDe(w) / w.price * 100) + ' % du prix)' : '—']].map(([k,v])=>(
                           <div key={k}><div style={{fontSize:10,color:C.muted,marginBottom:2}}>{k}</div><div style={{fontSize:12,color:C.wine,fontWeight:500}}>{v}</div></div>
                         ))}
                       </div>
@@ -2239,7 +2344,7 @@ function Admin({setView}) {
           <div>
             <div style={{...serif,fontSize:19,color:C.wine,marginBottom:14}}>Statistiques</div>
             <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:9,marginBottom:14}}>
-              {[['Valeur totale',totalValue+'€','💎'],['Prix médian',[...localWines].sort((a,b)=>a.price-b.price)[Math.floor(localWines.length/2)]?.price+'€','📊'],['Top note',[...localWines].sort((a,b)=>b.rating-a.rating)[0]?.rating+'/100','🏆']].map(([l,v,i])=>(
+              {[['Valeur totale',totalValue+'€','💎'],['Prix médian',[...localWines].sort((a,b)=>a.price-b.price)[Math.floor(localWines.length/2)]?.price+'€','📊'],['Bouteilles',localWines.reduce((s,w)=>s+w.stock,0),'📦']].map(([l,v,i])=>(
                 <div key={l} style={{background:C.cream,border:'1px solid '+C.bord,borderRadius:11,padding:'12px 8px',textAlign:'center'}}>
                   <div style={{fontSize:20,marginBottom:3}}>{i}</div>
                   <div style={{...serif,fontSize:15,fontWeight:700,color:C.wine}}>{v}</div>
@@ -2324,9 +2429,28 @@ function Admin({setView}) {
           <div style={{display:'flex',flexDirection:'column',gap:11}}>
             <div style={{...serif,fontSize:19,color:C.wine,marginBottom:4}}>Configuration</div>
             <div style={{background:C.cream,border:'1px solid '+C.bord,borderRadius:11,padding:'14px'}}>
+              <div style={{...serif,fontSize:14,color:C.wine,marginBottom:6}}>🎯 Stratégie de recommandation</div>
+              <p style={{fontSize:12,color:C.muted,marginBottom:11,lineHeight:1.6}}>Le sommelier choisit toujours d'abord les vins les mieux accordés à la demande du client, dans son budget. La stratégie sert uniquement à départager des vins également pertinents ; elle ne change jamais ce que le sommelier dit des vins.</p>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
+                {STRATEGIES_RECO.map(s => {
+                  const actif = strategie === s.id;
+                  return (
+                    <button key={s.id} onClick={() => choisirStrategie(s.id)} style={{textAlign:'left', background:actif ? '#fef9ed' : C.bg, border:'1.5px solid ' + (actif ? C.gold : C.bord), borderRadius:10, padding:'10px 12px', cursor:'pointer', fontFamily:'Montserrat,sans-serif'}}>
+                      <div style={{fontSize:12, fontWeight:700, color:C.wine, marginBottom:3}}>{actif ? '● ' : '○ '}{s.label}{s.id === 'neutre' ? ' (par défaut)' : ''}</div>
+                      <div style={{fontSize:11, color:C.muted, lineHeight:1.45}}>{s.desc}</div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            <div style={{background:C.cream,border:'1px solid '+C.bord,borderRadius:11,padding:'14px'}}>
               <div style={{...serif,fontSize:14,color:C.wine,marginBottom:6}}>📥 Import du stock magasin (Excel / CSV)</div>
-              <p style={{fontSize:12,color:C.muted,marginBottom:11,lineHeight:1.6}}>Mettez à jour le stock de ce magasin en une fois : depuis Excel, enregistrez votre fichier au format CSV avec les colonnes <strong>id;nom;stock;prix</strong> (ou simplement <strong>id;stock</strong>), puis importez-le ici. Les lignes inconnues sont ignorées.</p>
-              <input type="file" accept=".csv,.txt" onChange={e=>{handleCSVImport(e.target.files[0]); e.target.value='';}} style={{fontSize:12,fontFamily:'Montserrat,sans-serif',color:C.text}}/>
+              <p style={{fontSize:12,color:C.muted,marginBottom:11,lineHeight:1.6}}>Mettez à jour le stock de ce magasin en une fois : depuis Excel, enregistrez votre fichier au format CSV avec les colonnes <strong>id;nom;stock;prix;prix_achat</strong> (ou simplement <strong>id;stock</strong>), puis importez-le ici. Les lignes inconnues sont ignorées.</p>
+              <p style={{fontSize:12,color:C.muted,marginBottom:11,lineHeight:1.6}}>La colonne <strong>prix_achat</strong> est facultative : elle sert uniquement à la stratégie « Marge » et à l'affichage de la marge dans l'onglet Catalogue. Elle reste confidentielle : jamais montrée aux clients ni transmise au sommelier.</p>
+              <div style={{display:'flex',gap:9,alignItems:'center',flexWrap:'wrap'}}>
+                <input type="file" accept=".csv,.txt" onChange={e=>{handleCSVImport(e.target.files[0]); e.target.value='';}} style={{fontSize:12,fontFamily:'Montserrat,sans-serif',color:C.text}}/>
+                <button onClick={telechargerModeleCSV} style={{background:'transparent',color:C.wine,border:'1px solid '+C.bord2,borderRadius:50,padding:'7px 14px',fontSize:12,cursor:'pointer',fontFamily:'Montserrat,sans-serif'}}>⬇️ Télécharger le modèle (catalogue actuel)</button>
+              </div>
               <div style={{background:'#f0f4ff',border:'1px solid #d0d8ff',borderRadius:8,padding:'9px 13px',fontSize:12,color:'#4040a0',marginTop:11}}>💡 Les stocks importés sont conservés sur la borne, même après redémarrage.</div>
             </div>
             <div style={{background:C.cream,border:'1px solid '+C.bord,borderRadius:11,padding:'14px'}}>
