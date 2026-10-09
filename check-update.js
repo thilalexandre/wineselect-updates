@@ -151,6 +151,18 @@ const FILES = [
     minLength: 3000,
     checkSyntax: true,
   },
+  // Démarrage de la borne (octobre 2026). Jamais remplacé sur place : Windows lit
+  // un .bat au fil de son exécution, et INSTALLER.bat tourne pendant cette
+  // vérification. On dépose INSTALLER.bat.nouveau, qu'INSTALLER.bat met en place
+  // lui-même juste après. Les marqueurs garantissent que la nouvelle version
+  // sait encore se mettre à jour et relancer le serveur.
+  {
+    name: 'INSTALLER.bat',
+    url: 'https://raw.githubusercontent.com/thilalexandre/wineselect-updates/refs/heads/main/INSTALLER.bat',
+    minLength: 2000,
+    enAttente: true,
+    marqueurs: ['@echo off', 'INSTALLER.bat.nouveau', ':boucleServeur', 'check-update.js'],
+  },
   // Catalogue de démonstration : installé comme wines-data.js UNIQUEMENT si la
   // borne tourne déjà sur la démo (ou n'a pas encore de catalogue). Le catalogue
   // d'un magasin (sans la mention de démonstration) n'est jamais écrasé.
@@ -226,6 +238,7 @@ async function checkAndUpdate(file) {
     console.log('⚠️  ' + file.name + ' : le fichier distant n\'est pas un catalogue de démonstration. Ignoré par sécurité.');
     return;
   }
+  if (file.enAttente) return preparerRemplacement(file, localPath, remoteContent);
 
   let localContent = null;
   try {
@@ -266,6 +279,29 @@ async function checkAndUpdate(file) {
   fs.writeFileSync(localPath + '.tmp', remoteContent, file.binaire ? undefined : 'utf-8');
   fs.renameSync(localPath + '.tmp', localPath);
   console.log('⬆️  ' + file.name + ' mis à jour depuis GitHub.');
+}
+
+// Fichier en cours d'utilisation (INSTALLER.bat) : la nouvelle version est déposée
+// à côté (<nom>.nouveau) ; c'est le fichier lui-même qui se remplace ensuite.
+function preparerRemplacement(file, localPath, contenu) {
+  const attente = localPath + '.nouveau';
+  // Fins de ligne Windows obligatoires : sans elles, un .bat saute mal vers ses étiquettes.
+  contenu = contenu.replace(/\r?\n/g, '\r\n');
+  const manquants = (file.marqueurs || []).filter(m => !contenu.includes(m));
+  if (manquants.length) {
+    console.log('⚠️  ' + file.name + ' : le fichier distant ne contient pas ' + manquants.join(', ') + '. On garde la version locale par sécurité.');
+    return;
+  }
+  let localContent = null;
+  try { localContent = fs.readFileSync(localPath, 'utf-8'); } catch (e) {}
+  if (localContent !== null && hash(localContent) === hash(contenu)) {
+    try { fs.unlinkSync(attente); } catch (e) {} // reste d'une mise en place manquée
+    console.log('✓ ' + file.name + ' déjà à jour.');
+    return;
+  }
+  fs.writeFileSync(attente + '.tmp', contenu, 'utf-8');
+  fs.renameSync(attente + '.tmp', attente);
+  console.log('⬆️  ' + file.name + ' : nouvelle version téléchargée, mise en place juste après.');
 }
 
 // Ne garde que les N sauvegardes .bak-<timestamp> les plus récentes pour ce
