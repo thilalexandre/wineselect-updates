@@ -239,6 +239,7 @@ async function checkAndUpdate(file) {
     return;
   }
 
+  fs.mkdirSync(path.dirname(localPath), { recursive: true }); // ex. vendor/ : avant la vérification de syntaxe
   if (file.checkSyntax) {
     // Le fichier de vérification doit finir par .js : depuis Node 22/24,
     // « node --check » refuse une extension inconnue (ex. .tmp-check).
