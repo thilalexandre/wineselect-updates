@@ -13,10 +13,116 @@ const crypto = require('crypto');
 const { execFileSync } = require('child_process');
 
 const FILES = [
+  // Bibliothèques et polices de l'écran (octobre 2026), servies par la borne
+  // pour qu'elle démarre sans Internet. Fichiers figés : pas de sauvegarde .bak.
+  {
+    name: 'vendor/react.production.min.js',
+    url: 'https://raw.githubusercontent.com/thilalexandre/wineselect-updates/refs/heads/main/vendor/react.production.min.js',
+    minLength: 5000,
+    checkSyntax: true,
+    sansSauvegarde: true,
+  },
+  {
+    name: 'vendor/react-dom.production.min.js',
+    url: 'https://raw.githubusercontent.com/thilalexandre/wineselect-updates/refs/heads/main/vendor/react-dom.production.min.js',
+    minLength: 50000,
+    checkSyntax: true,
+    sansSauvegarde: true,
+  },
+  {
+    name: 'vendor/babel.min.js',
+    url: 'https://raw.githubusercontent.com/thilalexandre/wineselect-updates/refs/heads/main/vendor/babel.min.js',
+    minLength: 1000000,
+    checkSyntax: true,
+    sansSauvegarde: true,
+  },
+  {
+    name: 'vendor/polices.css',
+    url: 'https://raw.githubusercontent.com/thilalexandre/wineselect-updates/refs/heads/main/vendor/polices.css',
+    minLength: 500,
+    sansSauvegarde: true,
+  },
+  {
+    name: 'vendor/polices/cormorant-garamond-latin-400-italic.woff2',
+    url: 'https://raw.githubusercontent.com/thilalexandre/wineselect-updates/refs/heads/main/vendor/polices/cormorant-garamond-latin-400-italic.woff2',
+    minLength: 5000,
+    binaire: true,
+    sansSauvegarde: true,
+  },
+  {
+    name: 'vendor/polices/cormorant-garamond-latin-400-normal.woff2',
+    url: 'https://raw.githubusercontent.com/thilalexandre/wineselect-updates/refs/heads/main/vendor/polices/cormorant-garamond-latin-400-normal.woff2',
+    minLength: 5000,
+    binaire: true,
+    sansSauvegarde: true,
+  },
+  {
+    name: 'vendor/polices/cormorant-garamond-latin-500-normal.woff2',
+    url: 'https://raw.githubusercontent.com/thilalexandre/wineselect-updates/refs/heads/main/vendor/polices/cormorant-garamond-latin-500-normal.woff2',
+    minLength: 5000,
+    binaire: true,
+    sansSauvegarde: true,
+  },
+  {
+    name: 'vendor/polices/cormorant-garamond-latin-600-normal.woff2',
+    url: 'https://raw.githubusercontent.com/thilalexandre/wineselect-updates/refs/heads/main/vendor/polices/cormorant-garamond-latin-600-normal.woff2',
+    minLength: 5000,
+    binaire: true,
+    sansSauvegarde: true,
+  },
+  {
+    name: 'vendor/polices/cormorant-garamond-latin-700-normal.woff2',
+    url: 'https://raw.githubusercontent.com/thilalexandre/wineselect-updates/refs/heads/main/vendor/polices/cormorant-garamond-latin-700-normal.woff2',
+    minLength: 5000,
+    binaire: true,
+    sansSauvegarde: true,
+  },
+  {
+    name: 'vendor/polices/montserrat-latin-400-normal.woff2',
+    url: 'https://raw.githubusercontent.com/thilalexandre/wineselect-updates/refs/heads/main/vendor/polices/montserrat-latin-400-normal.woff2',
+    minLength: 5000,
+    binaire: true,
+    sansSauvegarde: true,
+  },
+  {
+    name: 'vendor/polices/montserrat-latin-500-normal.woff2',
+    url: 'https://raw.githubusercontent.com/thilalexandre/wineselect-updates/refs/heads/main/vendor/polices/montserrat-latin-500-normal.woff2',
+    minLength: 5000,
+    binaire: true,
+    sansSauvegarde: true,
+  },
+  {
+    name: 'vendor/polices/montserrat-latin-600-normal.woff2',
+    url: 'https://raw.githubusercontent.com/thilalexandre/wineselect-updates/refs/heads/main/vendor/polices/montserrat-latin-600-normal.woff2',
+    minLength: 5000,
+    binaire: true,
+    sansSauvegarde: true,
+  },
+  {
+    name: 'vendor/polices/montserrat-latin-700-normal.woff2',
+    url: 'https://raw.githubusercontent.com/thilalexandre/wineselect-updates/refs/heads/main/vendor/polices/montserrat-latin-700-normal.woff2',
+    minLength: 5000,
+    binaire: true,
+    sansSauvegarde: true,
+  },
+  {
+    name: 'vendor/LICENCES.txt',
+    url: 'https://raw.githubusercontent.com/thilalexandre/wineselect-updates/refs/heads/main/vendor/LICENCES.txt',
+    minLength: 1000,
+    sansSauvegarde: true,
+  },
   {
     name: 'WineSelect.html',
     url: 'https://raw.githubusercontent.com/thilalexandre/wineselect-updates/refs/heads/main/WineSelect.html',
     minLength: 50000, // garde-fou : un téléchargement vide/coupé ne doit jamais écraser le fichier local
+  },
+  // Logique du sommelier (octobre 2026), chargée par serveur.js : placée AVANT
+  // lui, pour qu'un serveur.js neuf ne démarre jamais sans elle.
+  {
+    name: 'sommelier.js',
+    url: 'https://raw.githubusercontent.com/thilalexandre/wineselect-updates/refs/heads/main/sommelier.js',
+    minLength: 5000,
+    checkSyntax: true,
   },
   {
     name: 'serveur.js',
@@ -63,17 +169,24 @@ const FILES = [
 // de démonstration circule, et seulement vers les bornes en démo.
 const MARQUE_DEMO = 'Catalogue de DÉMONSTRATION';
 
-function fetchUrl(url, redirectsLeft = 5) {
+function fetchUrl(url, redirectsLeft = 5, binaire = false) {
   return new Promise((resolve, reject) => {
     https.get(url, { headers: { 'User-Agent': 'WineSelect-Updater' } }, (res) => {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location && redirectsLeft > 0) {
         res.resume();
-        fetchUrl(res.headers.location, redirectsLeft - 1).then(resolve, reject);
+        fetchUrl(res.headers.location, redirectsLeft - 1, binaire).then(resolve, reject);
         return;
       }
       if (res.statusCode !== 200) {
         res.resume();
         reject(new Error('HTTP ' + res.statusCode));
+        return;
+      }
+      // Polices (binaires) : octets bruts. Textes : UTF-8, sans couper un accent entre deux paquets.
+      if (binaire) {
+        const morceaux = [];
+        res.on('data', (chunk) => { morceaux.push(chunk); });
+        res.on('end', () => resolve(Buffer.concat(morceaux)));
         return;
       }
       let data = '';
@@ -99,7 +212,7 @@ async function checkAndUpdate(file) {
 
   let remoteContent;
   try {
-    remoteContent = await fetchUrl(file.url);
+    remoteContent = await fetchUrl(file.url, 5, !!file.binaire);
   } catch (e) {
     console.log('⚠️  ' + file.name + ' : vérification impossible (' + e.message + '). On garde la version locale.');
     return;
@@ -116,7 +229,7 @@ async function checkAndUpdate(file) {
 
   let localContent = null;
   try {
-    localContent = fs.readFileSync(localPath, 'utf-8');
+    localContent = file.binaire ? fs.readFileSync(localPath) : fs.readFileSync(localPath, 'utf-8');
   } catch (e) {
     // Pas de fichier local — première installation, on écrit directement plus bas.
   }
@@ -142,12 +255,15 @@ async function checkAndUpdate(file) {
     try { fs.unlinkSync(tmpPath); } catch (e2) {}
   }
 
-  if (localContent !== null) {
+  if (localContent !== null && !file.sansSauvegarde) {
     const backupPath = localPath + '.bak-' + Date.now();
     fs.copyFileSync(localPath, backupPath);
     cleanOldBackups(file.name, 5);
   }
-  fs.writeFileSync(localPath, remoteContent, 'utf-8');
+  fs.mkdirSync(path.dirname(localPath), { recursive: true }); // ex. vendor/polices/
+  // Écriture atomique : un fichier à moitié écrit (borne éteinte) ne casse jamais l'écran.
+  fs.writeFileSync(localPath + '.tmp', remoteContent, file.binaire ? undefined : 'utf-8');
+  fs.renameSync(localPath + '.tmp', localPath);
   console.log('⬆️  ' + file.name + ' mis à jour depuis GitHub.');
 }
 
@@ -181,6 +297,8 @@ async function main() {
 // borne démarrera avec un catalogue vide sans que ce soit évident : on
 // avertit clairement ici pour éviter une découverte en pleine démo.
 function checkWinesDataPresent() {
+  // Borne connectée au serveur central : le catalogue vient de lui, pas de ce fichier.
+  if (fs.existsSync(path.join(__dirname, 'borne-jeton.txt'))) return;
   const p = path.join(__dirname, 'wines-data.js');
   if (!fs.existsSync(p)) {
     console.log('');

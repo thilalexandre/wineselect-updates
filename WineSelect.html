@@ -3,10 +3,15 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>WineSelect</title>
-<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
-<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
-<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Montserrat:wght@400;500;600;700&display=swap" rel="stylesheet">
+<!-- Bibliothèques et polices servies par la borne (vendor/) : l'écran démarre même sans Internet.
+     Si un fichier manque encore (borne pas tout à fait à jour), secours sur Internet. -->
+<script src="vendor/react.production.min.js"></script>
+<script>window.React || document.write('<script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"><\/script>');</script>
+<script src="vendor/react-dom.production.min.js"></script>
+<script>window.ReactDOM || document.write('<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"><\/script>');</script>
+<script src="vendor/babel.min.js"></script>
+<script>window.Babel || document.write('<script src="https://unpkg.com/@babel/standalone@7.29.10/babel.min.js"><\/script>');</script>
+<link href="vendor/polices.css" rel="stylesheet">
 <style>*{box-sizing:border-box;margin:0;padding:0}body{background:#faf6ee}</style>
 </head>
 <body>
@@ -26,8 +31,10 @@ const CATALOG = (window.CATALOG_DATA || WINES || []).map(w => ({id:w.id, name:w.
 // CSV de l'admin. Si un champ manque, l'affichage retombe sur l'existant.
 const CHAMPS_FICHE = ['domaine','cuvee','millesime','photo','emplacement'];
 // Application des stocks/prix importés via CSV (admin)
+// Mode connecté : le catalogue reçu du serveur central est déjà à jour ; une
+// ancienne copie gardée dans le navigateur ne doit jamais l'écraser.
 try {
-  const ov = JSON.parse(localStorage.getItem('ws_stock_overrides')||'[]');
+  const ov = window.WS_MODE_CONNECTE ? [] : JSON.parse(localStorage.getItem('ws_stock_overrides')||'[]');
   ov.forEach(o=>{ const w=WINES.find(x=>x.id===o.id); if(w){
     if(typeof o.stock==='number'&&!isNaN(o.stock)) w.stock=o.stock;
     if(typeof o.price==='number'&&!isNaN(o.price)) w.price=o.price;
@@ -97,71 +104,6 @@ const C = {
   cardBg:'#ffffff', soft:'#f3ece0', ink:'#2a1215', body:'#4d3a35',
 };
 
-// Le PIN admin n'est plus stocké dans ce fichier — il est vérifié côté
-// serveur (route /api/admin-auth), pour ne plus être lisible en clair via
-// F12 (Inspecter / Sources). Voir admin-pin.txt côté serveur.js.
-
-function AdminGate({ children, setView }) {
-  const [pin, setPin] = React.useState('');
-  const [unlocked, setUnlocked] = React.useState(false);
-  const [error, setError] = React.useState(false);
-  const [checking, setChecking] = React.useState(false);
-
-  if (unlocked) return children;
-
-  const submit = async () => {
-    if (checking) return;
-    setChecking(true);
-    try {
-      const res = await fetch('/api/admin-auth', {
-        method: 'POST',
-        headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ pin }),
-      });
-      const data = await res.json();
-      if (data.ok) {
-        ADMIN_TOKEN = data.token || null;
-        setUnlocked(true);
-      } else {
-        setError(data.error || true);
-        setPin('');
-        setTimeout(() => setError(false), 1500);
-      }
-    } catch (e) {
-      setError('Connexion au serveur impossible');
-      setTimeout(() => setError(false), 1500);
-    } finally {
-      setChecking(false);
-    }
-  };
-
-  // Direction « Ivoire épuré » (valeurs écrites en dur : ce composant est
-  // déclaré avant C_IVOIRE).
-  return (
-    <div style={{minHeight:'100vh', background:'#faf6ee', display:'flex', alignItems:'center', justifyContent:'center', padding:'24px 24px 80px', fontFamily:'Montserrat,sans-serif'}}>
-      <div style={{maxWidth:400, width:'100%', background:'#ffffff', border:'1px solid #e6dccb', borderRadius:24, padding:'34px 28px', textAlign:'center'}}>
-        <div style={{width:68, height:68, margin:'0 auto 18px', borderRadius:'50%', border:'1px solid #c9b99f', display:'flex', alignItems:'center', justifyContent:'center', color:'#5e1622'}}>
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="5" y="10.5" width="14" height="10" rx="2"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/></svg>
-        </div>
-        <div style={{fontFamily:"'Cormorant Garamond',serif", fontSize:30, color:'#5e1622', fontWeight:500, marginBottom:6}}>Espace gérant</div>
-        <div style={{fontSize:14, color:'#6e5a50', marginBottom:22, lineHeight:1.6}}>Entrez le code PIN pour accéder à la gestion de la borne.</div>
-        <input
-          type="password"
-          inputMode="numeric"
-          value={pin}
-          onChange={e => setPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
-          onKeyDown={e => { if (e.key === 'Enter') submit(); }}
-          style={{width:'100%', minHeight:58, padding:'0 14px', fontSize:22, letterSpacing:'0.4em', textAlign:'center', background:'#faf6ee', color:'#2a1215', border:'1px solid ' + (error ? '#9b2c2c' : '#c9b99f'), borderRadius:999, marginBottom:14, fontFamily:'Montserrat,sans-serif', boxSizing:'border-box', outline:'none'}}
-          placeholder="••••"
-          autoFocus
-        />
-        {error && <div style={{color:'#9b2c2c', fontSize:13, marginBottom:12}}>{typeof error === 'string' ? error : 'Code incorrect'}</div>}
-        <button onClick={submit} disabled={checking} style={{width:'100%', minHeight:54, background:'#5e1622', color:'#faf6ee', border:'none', borderRadius:999, fontSize:15, fontWeight:500, cursor:checking?'default':'pointer', opacity:checking?0.7:1, marginBottom:10, fontFamily:'Montserrat,sans-serif'}}>{checking?'Vérification…':'Valider'}</button>
-        <button onClick={() => setView('home')} style={{width:'100%', minHeight:48, background:'transparent', color:'#5e1622', border:'1px solid #c9b99f', borderRadius:999, fontSize:14, cursor:'pointer', fontFamily:'Montserrat,sans-serif'}}>Retour</button>
-      </div>
-    </div>
-  );
-}
 const serif = {fontFamily:"'Cormorant Garamond',serif"};
 
 // ── Palette « Ivoire épuré » (direction graphique retenue, octobre 2026) ─────
@@ -295,14 +237,13 @@ const FEATURED_REASONS = {
 };
 const DEFAULT_FEATURED_LABEL = "Sélection du magasin";
 
-// Stratégie de recommandation choisie par le gérant (Admin > Config). Elle ne fait
-// que départager des vins également bien accordés : le conseil reste honnête.
-const STRATEGIES_RECO = [
-  {id:'neutre', label:'Neutre', desc:'Uniquement la pertinence : le meilleur accord, au cœur du budget du client.'},
-  {id:'panier', label:'Panier moyen', desc:'À pertinence égale, les vins du haut de la fourchette de prix du client.'},
-  {id:'marge',  label:'Marge', desc:"À pertinence égale, la marge brute en euros la plus élevée (prix d'achat à importer)."},
-  {id:'stock',  label:'Écouler le stock', desc:'À pertinence égale, les vins dont le stock est le plus élevé.'},
-];
+// La gestion du magasin (stocks, prix, stratégie…) se fait dans l'espace de
+// gestion en ligne : plus aucun accès gérant depuis cet écran (octobre 2026).
+// Seul reste l'écran de dépannage (appui long sur le logo, puis le code).
+
+// Fonctions client masquées en attendant les comptes clients WineSelect (chantier
+// suivant) : le code reste en place, passer à true pour les réafficher.
+const FONCTIONS_CLIENT = { carteFidelite: false, maCave: false };
 
 const TYPES=[
   {id:'rouge',  label:'Rouge',  desc:'Tanins et caractère',     color:'#6B2635', bg:'#fbeaec'},
@@ -594,44 +535,10 @@ function syncToServer(endpoint, data){
   }catch(e){}
 }
 
-// Token de session admin — obtenu après validation du PIN (/api/admin-auth),
-// requis par le serveur pour écrire sur les routes admin-only (stock-overrides).
-// Variable de module (pas de state React) : accessible depuis AdminGate et
-// depuis Admin sans avoir à la faire transiter en props.
-let ADMIN_TOKEN = null;
-
-// Comme syncToServer, mais réservé aux écritures admin-only (import CSV,
-// mise en avant). Best-effort comme le reste des sync : si le token a
-// expiré, le serveur refuse (401) et on log sans bloquer l'UI — l'admin
-// reverra l'écran PIN à sa prochaine ouverture d'Admin.
-function syncToServerAdmin(endpoint, data){
-  try{
-    fetch('/api/' + endpoint, {
-      method: 'POST',
-      headers: {'Content-Type':'application/json', 'X-Admin-Token': ADMIN_TOKEN || ''},
-      body: JSON.stringify(data),
-    }).then(r=>{ if(r.status===401){ ADMIN_TOKEN=null; console.warn('Session admin expirée — reconnexion nécessaire.'); } }).catch(()=>{});
-  }catch(e){}
-}
 function loadProfiles(){ try{ return JSON.parse(localStorage.getItem('ws_profiles')||'{}'); }catch(e){ return {}; } }
 function saveProfiles(p){ try{ localStorage.setItem('ws_profiles', JSON.stringify(p)); }catch(e){} syncToServer('profiles', p); }
 function loadGlobalRatings(){ try{ return JSON.parse(localStorage.getItem('ws_global_ratings')||'{}'); }catch(e){ return {}; } }
 function saveGlobalRatings(r){ try{ localStorage.setItem('ws_global_ratings', JSON.stringify(r)); }catch(e){} syncToServer('global-ratings', r); }
-
-// Restauration manuelle depuis le serveur (Admin > Config). Utile si le
-// cache du navigateur a été vidé ou si la borne a été réinstallée : les
-// dernières données sauvegardées côté serveur remplacent le localStorage.
-async function restoreFromServer(){
-  const [profiles, ratings, stock] = await Promise.all([
-    fetch('/api/profiles').then(r=>r.json()).catch(()=>null),
-    fetch('/api/global-ratings').then(r=>r.json()).catch(()=>null),
-    fetch('/api/stock-overrides').then(r=>r.json()).catch(()=>null),
-  ]);
-  if(profiles) localStorage.setItem('ws_profiles', JSON.stringify(profiles));
-  if(ratings) localStorage.setItem('ws_global_ratings', JSON.stringify(ratings));
-  if(stock) localStorage.setItem('ws_stock_overrides', JSON.stringify(stock));
-  return {profiles:!!profiles, ratings:!!ratings, stock:!!stock};
-}
 
 function useCustomer(){
   const [customer, setCustomer] = useState(()=>{
@@ -1102,19 +1009,21 @@ function Home({setView, collector, customerApi}) {
 
   return (
     <div style={{minHeight:'100vh', background:C.bg, color:C.ink, display:'flex', flexDirection:'column', paddingBottom:96}}>
-      {/* Barre haute : carte client, administration */}
-      <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', padding:'22px 24px 0'}}>
-        <button onClick={()=>setView('login')} style={boutonHaut} onMouseEnter={e=>survol(e,true)} onMouseLeave={e=>survol(e,false)}>
-          {client ? <IconeClient/> : <IconeCarte/>}
-          <span>{client ? client.name : 'Carte client'}</span>
-        </button>
-        <button onClick={()=>setView('admin')} style={{...boutonHaut, border:'1px solid transparent', color:C.muted}} onMouseEnter={e=>survol(e,true)} onMouseLeave={e=>{e.currentTarget.style.borderColor='transparent';}}>Gérant</button>
+      {/* Barre haute : carte client (masquée pour l'instant) */}
+      <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', padding:'22px 24px 0', minHeight:66}}>
+        {FONCTIONS_CLIENT.carteFidelite && (
+          <button onClick={()=>setView('login')} style={boutonHaut} onMouseEnter={e=>survol(e,true)} onMouseLeave={e=>survol(e,false)}>
+            {client ? <IconeClient/> : <IconeCarte/>}
+            <span>{client ? client.name : 'Carte client'}</span>
+          </button>
+        )}
       </div>
 
       {/* Signature */}
       <div style={{textAlign:'center', padding:'clamp(48px,10vh,96px) 24px 0'}}>
         <div style={capsIv(11, C.gold, {letterSpacing:'.34em', fontWeight:600, marginBottom:14})}>Cave &amp; Sélection</div>
-        <h1 style={{...serif, margin:0, fontSize:'clamp(3.4rem,11vw,5rem)', fontWeight:500, lineHeight:.95, letterSpacing:'-.02em', color:C.wine}}>WineSelect</h1>
+        {/* Appui long (3 s) sur le logo : écran de dépannage, pour l'installateur. */}
+        <h1 {...appuiLong(() => setView('depannage'))} style={{...serif, margin:0, fontSize:'clamp(3.4rem,11vw,5rem)', fontWeight:500, lineHeight:.95, letterSpacing:'-.02em', color:C.wine, userSelect:'none', WebkitUserSelect:'none', WebkitTouchCallout:'none'}}>WineSelect</h1>
         <div style={{display:'flex', alignItems:'center', justifyContent:'center', gap:12, margin:'20px auto 0'}}>
           <span style={{width:56, height:1, background:C.bord2}}/>
           <span style={{width:6, height:6, transform:'rotate(45deg)', background:C.gold}}/>
@@ -1153,8 +1062,8 @@ function Home({setView, collector, customerApi}) {
           ))}
         </div>
 
-        {/* Ma collection */}
-        <div style={{display:'flex', alignItems:'center', justifyContent:'center', gap:14, marginTop:30, flexWrap:'wrap'}}>
+        {/* Ma collection (masquée pour l'instant) */}
+        {FONCTIONS_CLIENT.maCave && <div style={{display:'flex', alignItems:'center', justifyContent:'center', gap:14, marginTop:30, flexWrap:'wrap'}}>
           <button onClick={()=>setView('collector')}
             style={{minHeight:44, padding:'0 18px', background:'transparent', border:'none', cursor:'pointer', fontFamily:'Montserrat,sans-serif', ...capsIv(11, C.wine, {letterSpacing:'.18em', fontWeight:600}), textDecoration:'underline', textUnderlineOffset:6, textDecorationColor:C.bord2}}>
             Ma collection
@@ -1165,7 +1074,7 @@ function Home({setView, collector, customerApi}) {
               {collector.discount>0 ? ' · −' + collector.discount + ' %' : ''}
             </span>
           )}
-        </div>
+        </div>}
       </div>
     </div>
   );
@@ -1620,7 +1529,7 @@ function Results({results, setView, collector}) {
   const prix = p => String(p).replace('.', ',') + ' €';
   const enCave = w => added===w.id || (collector.collection[w.id]||0) > 0;
 
-  const BoutonCave = ({w, small}) => (
+  const BoutonCave = ({w, small}) => !FONCTIONS_CLIENT.maCave ? null : (
     <button onClick={e=>{e.stopPropagation(); handleCollect(w);}}
       style={{...sans, minHeight:small?40:52, padding:small?'0 14px':'0 22px', background:enCave(w)?IV.soft:'transparent', border:'1px solid '+(enCave(w)?IV.line2:IV.wine), borderRadius:999, color:IV.wine, fontSize:small?12:14, fontWeight:500, cursor:'pointer', whiteSpace:'nowrap'}}>
       {added===w.id ? '✓ Ajouté à ma cave' : enCave(w) ? '✓ Dans ma cave' : 'Garder dans ma cave'}
@@ -1728,7 +1637,7 @@ function Results({results, setView, collector}) {
           <button onClick={()=>setView('chat')} style={{...sans, flex:1, minWidth:200, minHeight:58, background:'transparent', border:'1px solid '+IV.line2, borderRadius:999, color:IV.ink, fontSize:15, cursor:'pointer'}}>Demander au sommelier</button>
         </div>
       </div>
-      {modal && <WineModal wine={modal} onClose={()=>setModal(null)} onCollect={()=>{handleCollect(modal);setModal(null);}}/>}
+      {modal && <WineModal wine={modal} onClose={()=>setModal(null)} onCollect={FONCTIONS_CLIENT.maCave ? ()=>{handleCollect(modal);setModal(null);} : null}/>}
     </div>
   );
 }
@@ -1778,10 +1687,10 @@ function Mystery({setView, collector}) {
             <div style={{fontSize:13, color:I.muted, marginBottom:18}}>Touchez la carte pour la retourner</div>
             {wine.emplacement && <div style={{display:'flex', justifyContent:'center', marginBottom:20}}><EmplacementVin wine={wine} grand={true}/></div>}
             <div style={{display:'flex', gap:10, justifyContent:'center', flexWrap:'wrap'}}>
-              <button onClick={()=>{ if (!enCave) { collector.addWine(wine.id); setAdded(true); } }}
+              {FONCTIONS_CLIENT.maCave && <button onClick={()=>{ if (!enCave) { collector.addWine(wine.id); setAdded(true); } }}
                 style={{...sans, minHeight:52, padding:'0 26px', background:enCave ? I.soft : I.wine, color:enCave ? I.wine : I.bg, border:'1px solid ' + (enCave ? I.bord2 : I.wine), borderRadius:999, fontSize:14, fontWeight:500, cursor:enCave ? 'default' : 'pointer'}}>
                 {added ? '✓ Ajouté à ma cave' : enCave ? '✓ Dans ma cave' : 'Garder dans ma cave'}
-              </button>
+              </button>}
               <button onClick={reveal} style={{...sans, minHeight:52, padding:'0 26px', background:'transparent', color:I.wine, border:'1px solid ' + I.bord2, borderRadius:999, fontSize:14, cursor:'pointer'}}>Une autre suggestion</button>
             </div>
           </div>
@@ -1880,10 +1789,10 @@ function Chat({setView, collector, customer}) {
                       </div>
                       <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', gap:12, flexWrap:'wrap', padding:'12px 18px', borderTop:'1px solid ' + I.bord, background:I.bg}}>
                         <EmplacementVin wine={w}/>
-                        <button onClick={()=>handleCollect(w)}
+                        {FONCTIONS_CLIENT.maCave && <button onClick={()=>handleCollect(w)}
                           style={{...sans, minHeight:44, padding:'0 18px', background:enCave(w)?I.soft:'transparent', border:'1px solid ' + (enCave(w)?I.bord2:I.wine), borderRadius:999, color:I.wine, fontSize:13, fontWeight:500, cursor:'pointer', whiteSpace:'nowrap'}}>
                           {added===w.id ? '✓ Ajouté à ma cave' : enCave(w) ? '✓ Dans ma cave' : 'Garder dans ma cave'}
-                        </button>
+                        </button>}
                       </div>
                     </div>
                   ))}
@@ -1935,7 +1844,7 @@ function Chat({setView, collector, customer}) {
           </button>
         </div>
       </div>
-      {modal&&<WineModal wine={modal} onClose={()=>setModal(null)} onCollect={()=>{handleCollect(modal);setModal(null);}}/>}
+      {modal&&<WineModal wine={modal} onClose={()=>setModal(null)} onCollect={FONCTIONS_CLIENT.maCave ? ()=>{handleCollect(modal);setModal(null);} : null}/>}
     </div>
   );
 }
@@ -2143,572 +2052,158 @@ function CollectorPage({setView, collector, customer}) {
   );
 }
 
-// ── ADMIN ─────────────────────────────────────────────────────────────────────
-function Admin({setView}) {
-  const [tab,          setTab]          = useState('dashboard');
-  const [search,       setSearch]       = useState('');
-  const [typeFilter,   setTypeFilter]   = useState('all');
-  const [budgetFilter, setBudgetFilter] = useState('all');
-  const [sortBy,       setSortBy]       = useState('name');
-  const [expanded,     setExpanded]     = useState(null);
-  const [editWine,     setEditWine]     = useState(null);
-  const [localWines,   setLocalWines]   = useState(WINES);
-  const [notif,        setNotif]        = useState(null);
+// ── DÉPANNAGE (installateur, technicien) ──────────────────────────────────────
+// Ouvert par un appui long sur le logo de l'accueil, puis un code : le code
+// commun des bornes (espace super admin) en mode connecté, le PIN de la borne
+// en mode autonome. Jamais destiné aux clients ; la remise à zéro après 90 s
+// d'inactivité le referme comme n'importe quel écran.
 
-  const notify = (msg, type='success') => { setNotif({msg,type}); setTimeout(()=>setNotif(null),3000); };
+// Appui long : déclenche fn après ms millisecondes de pression continue (doigt ou souris).
+let minuterieAppuiLong = null;
+function appuiLong(fn, ms) {
+  const annuler = () => { if (minuterieAppuiLong) { clearTimeout(minuterieAppuiLong); minuterieAppuiLong = null; } };
+  return {
+    onPointerDown: () => { annuler(); minuterieAppuiLong = setTimeout(() => { minuterieAppuiLong = null; fn(); }, ms || 3000); },
+    onPointerUp: annuler, onPointerLeave: annuler, onPointerCancel: annuler,
+    onContextMenu: e => e.preventDefault(),
+  };
+}
 
-  // ── Stratégie de recommandation (enregistrée sur le serveur, qui l'applique seul) ──
-  const [strategie, setStrategie] = useState('neutre');
-  useEffect(() => {
-    fetch('/api/config-reco').then(r => r.json()).then(d => { if (d && d.strategie) setStrategie(d.strategie); }).catch(() => {});
-  }, []);
-  // ── Prix d'achat (confidentiels) : lus et écrits sur le serveur avec le PIN admin,
-  // gardés en mémoire le temps de la session admin, JAMAIS dans localStorage.
-  const [prixAchat, setPrixAchat] = useState({});
-  useEffect(() => {
-    fetch('/api/prix-achat', {headers:{'X-Admin-Token': ADMIN_TOKEN || ''}})
-      .then(r => r.ok ? r.json() : {}).then(d => setPrixAchat(d || {})).catch(() => {});
-  }, []);
-  const margeDe = w => { const pa = prixAchat[w.id]; return typeof pa === 'number' && pa > 0 ? w.price - pa : null; };
-  const fmtEuro = v => (Math.round(v * 100) / 100).toFixed(2).replace('.', ',') + '€';
+function Depannage({setView}) {
+  const I = C_IVOIRE;
+  const sans = {fontFamily:'Montserrat,sans-serif'};
+  const [code, setCode] = useState('');
+  const [jeton, setJeton] = useState(null);
+  const [etat, setEtat] = useState(null);
+  const [erreur, setErreur] = useState('');
+  const [info, setInfo] = useState('');
+  const [occupe, setOccupe] = useState(false);
+  const [test, setTest] = useState(null);
+  const [install, setInstall] = useState({serveur:'', jeton:''});
+  const [installe, setInstalle] = useState(false);
 
-  const choisirStrategie = s => {
-    setStrategie(s);
-    syncToServerAdmin('config-reco', {strategie: s});
-    notify('Stratégie enregistrée : ' + (STRATEGIES_RECO.find(x => x.id === s) || {}).label);
+  const appel = async (chemin, corps, methode) => {
+    const r = await fetch('/api/depannage/' + chemin, {
+      method: methode || (corps ? 'POST' : 'GET'),
+      headers: Object.assign({'Content-Type':'application/json'}, jeton ? {'X-Admin-Token': jeton} : {}),
+      body: corps ? JSON.stringify(corps) : undefined,
+    });
+    let d = {};
+    try { d = await r.json(); } catch (e) {}
+    if (!r.ok) throw new Error(d.error || ('Erreur ' + r.status));
+    return d;
+  };
+  const action = async (fn) => {
+    setOccupe(true); setErreur(''); setInfo('');
+    try { await fn(); } catch (e) { setErreur(e.message); } finally { setOccupe(false); }
   };
 
-  // ── Suggestions "surstock" ───────────────────────────────────────────────
-  // Le stock brut n'est pas comparable entre tranches (un vin à 6€ a
-  // structurellement bien plus de stock qu'un grand cru à 80€) : on compare
-  // donc chaque vin à la moyenne de SA tranche budgétaire, pour repérer un
-  // vrai surstock relatif plutôt que de ne remonter que les vins bon marché.
-  const overstockSuggestions = useMemo(() => {
-    const byBracket = {};
-    localWines.forEach(w => { (byBracket[w.budget] ||= []).push(w.stock); });
-    const avgOf = b => { const arr = byBracket[b]||[]; return arr.length ? arr.reduce((a,c)=>a+c,0)/arr.length : 0; };
-    return localWines
-      .filter(w => !w.featured && w.stock > avgOf(w.budget) * 1.4)
-      .map(w => ({ w, excess: w.stock / (avgOf(w.budget) || 1) }))
-      .sort((a,b) => b.excess - a.excess)
-      .slice(0, 6)
-      .map(x => x.w);
-  }, [localWines]);
-
-  const applySuggestion = w => {
-    setLocalWines(p => { const next = p.map(x => x.id===w.id ? {...x, featured:true, featuredReason:'stock'} : x); persistOverrides(next); return next; });
-    notify('"' + w.name + '" ajouté à la sélection');
-  };
-
-  // Persistance partagée (stock/prix/sélection) — appelée après chaque mutation
-  // de localWines pour que ça survienne au reset d'inactivité (90s) et au
-  // redémarrage de la borne, comme le fait déjà l'import CSV.
-  const persistOverrides = wines => {
-    try {
-      const data = wines.map(w=>{
-        const o = {id:w.id, stock:w.stock, price:w.price, featured:!!w.featured, featuredReason:w.featuredReason||null};
-        CHAMPS_FICHE.forEach(k=>{ if(w[k]!==undefined && w[k]!==null && String(w[k]).trim()) o[k]=String(w[k]).trim(); });
-        return o;
-      });
-      localStorage.setItem('ws_stock_overrides', JSON.stringify(data));
-      syncToServerAdmin('stock-overrides', data);
-    } catch(e) {}
-  };
-
-  // Recherche sans tenir compte des accents ni des majuscules (« cotes du rhone » trouve « Côtes-du-Rhône »)
-  const norm = s => String(s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
-  const filtered = localWines.filter(w=>{
-    if (typeFilter!=='all'&&w.type!==typeFilter) return false;
-    if (budgetFilter!=='all'&&w.budget!==budgetFilter) return false;
-    if (search){const s=norm(search);return norm(w.name).includes(s)||norm(w.region).includes(s)||norm(w.grape).includes(s);}
-    return true;
-  }).sort((a,b)=>{
-    if(sortBy==='price_desc')return b.price-a.price;
-    if(sortBy==='price_asc') return a.price-b.price;
-    if(sortBy==='stock_asc') return a.stock-b.stock;
-    if(sortBy==='name')      return a.name.localeCompare(b.name);
-    return 0;
+  const ouvrir = () => action(async () => {
+    const d = await appel('ouvrir', {code: code});
+    setJeton(d.token); setEtat(d.etat); setCode('');
+    setInstall({serveur: d.etat.serveur || 'https://gestion.wineselect-france.fr', jeton: ''});
   });
-
-  const nbSelection=localWines.filter(w=>w.featured).length;
-  const avgPrice=(localWines.reduce((s,w)=>s+w.price,0)/localWines.length).toFixed(0);
-  const lowStock=localWines.filter(w=>w.stock<10).length;
-  const totalValue=localWines.reduce((s,w)=>s+w.price*w.stock,0).toLocaleString('fr-FR');
-  const byType={rouge:0,blanc:0,rosé:0,bulles:0};
-  localWines.forEach(w=>{if(byType[w.type]!==undefined)byType[w.type]++;});
-  const topStock=[...localWines].sort((a,b)=>b.stock-a.stock).slice(0,5);
-  const topPriced=[...localWines].sort((a,b)=>b.price-a.price).slice(0,5);
-  const lowStockW=[...localWines].filter(w=>w.stock<10).sort((a,b)=>a.stock-b.stock);
-
-  // Données des avis clients (notes 1-5 étoiles agrégées)
-  const globalRatings = loadGlobalRatings();
-  const profiles = loadProfiles();
-  const ratedWines = Object.entries(globalRatings).map(([id,e])=>{
-    const w = localWines.find(x=>x.id===parseInt(id));
-    return (w && e.count>0) ? {wine:w, avg:e.sum/e.count, count:e.count} : null;
-  }).filter(Boolean).sort((a,b)=>b.avg-a.avg);
-  const totalReviews = ratedWines.reduce((s,r)=>s+r.count,0);
-  const globalAvg = totalReviews ? (ratedWines.reduce((s,r)=>s+r.avg*r.count,0)/totalReviews) : 0;
-  const nbClients = Object.keys(profiles).length;
-
-  const exportReviewsCSV = () => {
-    const lines = ['id;vin;region;type;prix;note_moyenne;nb_avis'];
-    ratedWines.forEach(r=>lines.push([r.wine.id,'"'+r.wine.name+'"',r.wine.region,r.wine.type,r.wine.price,r.avg.toFixed(2),r.count].join(';')));
-    const blob = new Blob(['\ufeff'+lines.join('\n')], {type:'text/csv;charset=utf-8'});
-    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'avis_clients_wineselect.csv'; a.click();
-    notify('Export CSV des avis téléchargé');
+  const touche = t => {
+    setErreur('');
+    if (t === 'effacer') setCode(code.slice(0, -1));
+    else if (t === 'ok') ouvrir();
+    else if (code.length < 10) setCode(code + t);
   };
 
-  // Copie externe téléchargeable des données (profils, notes, stocks), en
-  // plus de la sauvegarde automatique côté serveur : utile pour une archive
-  // personnelle, un changement de machine, ou un envoi par email.
-  const exportDataJSON = () => {
-    const data = {
-      exportedAt: new Date().toISOString(),
-      profiles: loadProfiles(),
-      globalRatings: loadGlobalRatings(),
-      stockOverrides: JSON.parse(localStorage.getItem('ws_stock_overrides')||'[]'),
-    };
-    const blob = new Blob([JSON.stringify(data, null, 2)], {type:'application/json;charset=utf-8'});
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'wineselect-donnees-' + new Date().toISOString().slice(0,10) + '.json';
-    a.click();
-    notify('Export JSON téléchargé');
-  };
-
-  // Import de stock via fichier CSV (export Excel : id;nom;stock;prix ou id;stock)
-  // Modèle CSV pré-rempli avec le catalogue actuel (séparateur ; et virgule décimale,
-  // comme Excel en français) : le gérant n'a plus qu'à compléter stocks et prix d'achat.
-  const telechargerModeleCSV = () => {
-    const dec = v => (v===null || v===undefined || v==='') ? '' : String(v).replace('.', ',');
-    const txt = v => (v===null || v===undefined) ? '' : String(v).replace(/;/g, ',');
-    const lignes = ['id;nom;stock;prix;prix_achat;domaine;cuvee;millesime;photo;emplacement'].concat(localWines.map(w =>
-      [w.id, txt(w.name), w.stock, dec(w.price), dec(prixAchat[w.id])].concat(CHAMPS_FICHE.map(k=>txt(w[k]))).join(';')));
-    const blob = new Blob(['﻿' + lignes.join('\n')], {type:'text/csv;charset=utf-8'});
-    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'modele-stock-wineselect.csv'; a.click();
-  };
-
-  const handleCSVImport = (file) => {
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = ev => {
-      try {
-        const text = String(ev.target.result||'');
-        const lines = text.split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
-        if (!lines.length) { notify('Fichier vide','error'); return; }
-        const sep = lines[0].includes(';') ? ';' : (lines[0].includes('\t') ? '\t' : ',');
-        const split = line => line.split(sep).map(c=>c.trim().replace(/^"|"$/g,''));
-        const num = v => { const n = parseFloat(String(v==null?'':v).replace(',','.').replace(/[€\s]/g,'')); return isNaN(n) ? null : n; };
-        // En-tête facultatif : s'il existe, les colonnes sont repérées par leur nom
-        // (id, stock, prix, prix_achat), dans n'importe quel ordre. Sinon, ordre
-        // du modèle : id;nom;stock;prix;prix_achat (ou simplement id;stock).
-        const entete = split(lines[0]).map(h=>h.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[\s-]+/g,'_'));
-        const avecEntete = isNaN(parseInt(entete[0]));
-        const col = nom => entete.indexOf(nom);
-        const idx = avecEntete
-          ? {id:col('id'), stock:col('stock'), prix:col('prix'), pa:Math.max(col('prix_achat'), col('prixachat'))}
-          : null;
-        // Colonnes de fiche produit (facultatives, uniquement avec en-tête) :
-        // domaine, cuvee, millesime, photo, emplacement. Une cellule vide ne
-        // change rien à la valeur déjà enregistrée.
-        const idxFiche = {};
-        if (avecEntete) CHAMPS_FICHE.forEach(k=>{ const i=col(k); if(i>=0) idxFiche[k]=i; });
-        const lignes = [];
-        (avecEntete ? lines.slice(1) : lines).forEach(line=>{
-          const c=split(line);
-          const id=parseInt(c[idx ? idx.id : 0]); if(!id||isNaN(id)) return;
-          const fiche = {};
-          Object.keys(idxFiche).forEach(k=>{ const v=(c[idxFiche[k]]||'').trim(); if(v) fiche[k]=v; });
-          if (idx) lignes.push({id, stock: idx.stock>=0 ? parseInt(c[idx.stock]) : NaN, prix: idx.prix>=0 ? num(c[idx.prix]) : null, pa: idx.pa>=0 ? num(c[idx.pa]) : null, fiche});
-          else lignes.push({id, stock: parseInt(c.length>=3 ? c[2] : c[1]), prix: c.length>=4 ? num(c[3]) : null, pa: c.length>=5 ? num(c[4]) : null, fiche});
-        });
-        let updated=0, priced=0, fiches=0;
-        const achats = {};
-        const connus = new Set(localWines.map(w=>w.id));
-        lignes.forEach(l=>{ if(connus.has(l.id) && l.pa!==null && l.pa>0) achats[l.id]=l.pa; });
-        setLocalWines(prev=>{
-          const next=[...prev];
-          lignes.forEach(l=>{
-            const i=next.findIndex(w=>w.id===l.id); if(i<0) return;
-            const w={...next[i]};
-            if(!isNaN(l.stock)){ w.stock=l.stock; updated++; }
-            if(l.prix!==null && l.prix>0){ w.price=l.prix; w.budget=budgetForPrice(l.prix); priced++; }
-            if(Object.keys(l.fiche).length){ Object.assign(w, l.fiche); fiches++; }
-            next[i]=w;
-          });
-          try{ persistOverrides(next); }catch(e){}
-          return next;
-        });
-        // Les fiches s'affichent côté client avec le tableau WINES : on le met à jour aussi
-        lignes.forEach(l=>{ const w=WINES.find(x=>x.id===l.id); if(w && Object.keys(l.fiche).length) Object.assign(w, l.fiche); });
-        // Prix d'achat : envoyés au serveur seulement (fusion), jamais dans localStorage
-        const nbAchats = Object.keys(achats).length;
-        if (nbAchats) { syncToServerAdmin('prix-achat', achats); setPrixAchat(p=>Object.assign({}, p, achats)); }
-        setTimeout(()=>{ (updated>0||nbAchats>0||fiches>0) ? notify(updated+' stock'+(updated>1?'s':'')+' mis à jour'+(priced?' · '+priced+' prix actualisés':'')+(nbAchats?' · '+nbAchats+" prix d'achat":'')+(fiches?' · '+fiches+' fiche'+(fiches>1?'s':'')+' produit':'')) : notify('Aucune ligne reconnue — vérifiez les colonnes (id;nom;stock;prix;prix_achat)','error'); }, 60);
-      } catch(err) { notify('Fichier illisible — enregistrez-le en CSV depuis Excel','error'); }
-    };
-    reader.readAsText(file, 'utf-8');
-  };
-
-  const TABS=[{id:'dashboard',label:'Tableau de bord'},{id:'wines',label:'Catalogue'},{id:'stocks',label:'Stocks'},{id:'stats',label:'Statistiques'},{id:'reviews',label:'Avis clients'},{id:'config',label:'Réglages'}];
+  const bouton = (libelle, onClick, plein, desactive) => (
+    <button onClick={onClick} disabled={occupe || desactive} style={{...sans, minHeight:50, padding:'0 22px', borderRadius:999, fontSize:14, fontWeight:500,
+      cursor: occupe ? 'wait' : 'pointer', opacity: (occupe || desactive) ? .6 : 1,
+      background: plein ? I.wine : 'transparent', color: plein ? I.bg : I.wine, border:'1px solid ' + (plein ? I.wine : I.bord2)}}>{libelle}</button>
+  );
+  const ligne = (libelle, valeur, alerte) => (
+    <div style={{display:'flex', justifyContent:'space-between', gap:16, padding:'9px 0', borderBottom:'1px solid ' + I.bord, fontSize:14}}>
+      <span style={{color:I.muted}}>{libelle}</span>
+      <span style={{color: alerte ? '#9b2c2c' : I.ink, textAlign:'right', fontWeight:500}}>{valeur}</span>
+    </div>
+  );
+  const cadre = {background:I.cream, border:'1px solid ' + I.bord, borderRadius:20, padding:'20px 22px', marginBottom:16};
+  const titre = t => <div style={capsIv(11, I.gold, {fontWeight:600, marginBottom:12})}>{t}</div>;
+  const message = (texte, mauvais) => texte ? <div style={{fontSize:14, lineHeight:1.5, padding:'12px 16px', borderRadius:14, marginBottom:16,
+    color: mauvais ? '#9b2c2c' : '#2f5f33', background: mauvais ? '#fbeef0' : '#eef5ee', border:'1px solid ' + (mauvais ? '#ecc8ce' : '#cfe3cf')}}>{texte}</div> : null;
+  const dateHeure = iso => iso ? new Date(iso).toLocaleString('fr-FR', {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'}) : 'jamais';
 
   return (
-    <div style={{minHeight:'100vh',background:C.bg}}>
-      {notif&&<div style={{position:'fixed',top:14,right:14,zIndex:999,background:notif.type==='success'?'#d4edda':'#f8d7da',border:'1px solid '+(notif.type==='success'?'#c3e6cb':'#f5c6cb'),borderRadius:10,padding:'10px 16px',fontSize:13,color:notif.type==='success'?'#155724':'#721c24',boxShadow:'0 4px 12px rgba(0,0,0,.1)'}}>{notif.type==='success'?'':''} {notif.msg}</div>}
-      <Header title="Espace gérant" subtitle={localWines.length + ' références'} onBack={()=>setView('home')}/>
-      <div style={{background:C.cream,borderBottom:'1px solid '+C.bord,padding:'0 16px',display:'flex',gap:2,overflowX:'auto'}}>
-        {TABS.map(t=>(
-          <button key={t.id} onClick={()=>setTab(t.id)} style={{background:'none',border:'none',borderBottom:'2px solid '+(tab===t.id?C.wine:'transparent'),color:tab===t.id?C.wine:C.muted,padding:'16px 14px',minHeight:52,fontSize:13,letterSpacing:'.02em',cursor:'pointer',fontFamily:'Montserrat,sans-serif',fontWeight:tab===t.id?600:400,whiteSpace:'nowrap'}}>{t.label}</button>
-        ))}
-      </div>
-      <div style={{maxWidth:860,margin:'0 auto',padding:'16px'}}>
+    <div style={{minHeight:'100vh', background:I.bg, color:I.ink, ...sans}}>
+      <EnteteIvoire onBack={() => setView('home')}/>
+      <div style={{maxWidth:560, margin:'0 auto', padding:'28px 24px 120px'}}>
+        <div style={capsIv(11, I.gold, {fontWeight:600, marginBottom:8})}>Réservé à l'installation</div>
+        <h2 style={{...serif, fontSize:38, fontWeight:500, color:I.wine, margin:'0 0 22px'}}>Dépannage de la borne</h2>
 
-        {tab==='dashboard'&&(
-          <div>
-            <div style={{...serif,fontSize:19,color:C.wine,marginBottom:14}}>Vue d'ensemble</div>
-            <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:9,marginBottom:16}}>
-              {[['Références',localWines.length,''],['Sélection',nbSelection,''],['Prix moy.',avgPrice+'€',''],['Alertes',lowStock,'']].map(([l,v,i])=>(
-                <div key={l} style={{background:C.cream,border:'1px solid '+(l==='Alertes'&&lowStock>0?'#f5c6cb':C.bord),borderRadius:11,padding:'12px 8px',textAlign:'center'}}>
-                  <div style={{fontSize:20}}>{i}</div>
-                  <div style={{...serif,fontSize:18,fontWeight:700,color:l==='Alertes'&&lowStock>0?'#b91c1c':C.wine}}>{v}</div>
-                  <div style={{fontSize:10,color:C.muted,marginTop:2}}>{l}</div>
-                </div>
+        {!jeton ? (
+          <div style={cadre}>
+            <div style={{fontSize:14, color:I.body, marginBottom:16, lineHeight:1.6}}>Saisissez le code de dépannage.</div>
+            <div style={{textAlign:'center', fontSize:30, letterSpacing:'.4em', minHeight:44, color:I.wine, marginBottom:12}}>{code ? '•'.repeat(code.length) : '—'}</div>
+            {message(erreur, true)}
+            <div style={{display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:10}}>
+              {['1','2','3','4','5','6','7','8','9','effacer','0','ok'].map(t => (
+                <button key={t} onClick={() => touche(t)} disabled={occupe}
+                  style={{...sans, minHeight:62, borderRadius:16, fontSize: t.length > 1 ? 14 : 24, cursor:'pointer',
+                    background: t === 'ok' ? I.wine : I.bg, color: t === 'ok' ? I.bg : I.ink, border:'1px solid ' + (t === 'ok' ? I.wine : I.bord2)}}>
+                  {t === 'effacer' ? 'Effacer' : t === 'ok' ? (occupe ? '…' : 'Valider') : t}
+                </button>
               ))}
             </div>
-            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:14}}>
-              <div style={{background:C.cream,border:'1px solid '+C.bord,borderRadius:11,padding:'13px'}}>
-                <div style={{...serif,fontSize:14,color:C.wine,marginBottom:10}}>Par type</div>
-                {TYPES.map(t=>{
-                  const cnt=localWines.filter(w=>w.type===t.id).length;
-                  const pct=Math.round(cnt/localWines.length*100);
-                  return <div key={t.id} style={{marginBottom:7}}>
-                    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',fontSize:11,marginBottom:2}}><span style={{display:'flex',alignItems:'center',gap:5}}><TypeIcon id={t.id} color={t.color} size={14}/> {t.label}</span><span style={{color:C.wine,fontWeight:600}}>{cnt} ({pct}%)</span></div>
-                    <div style={{background:'rgba(107,31,42,.08)',borderRadius:50,height:5,overflow:'hidden'}}><div style={{height:'100%',borderRadius:50,background:t.color,width:pct+'%'}}/></div>
-                  </div>;
-                })}
-              </div>
-              <div style={{background:C.cream,border:'1px solid '+C.bord,borderRadius:11,padding:'13px'}}>
-                <div style={{...serif,fontSize:14,color:C.wine,marginBottom:10}}>Par budget</div>
-                {[['-8','moins de 8€'],['8-15','8-15€'],['15-25','15-25€'],['25-50','25-50€'],['50+','50€+']].map(([id,l])=>{
-                  const cnt=localWines.filter(w=>w.budget===id).length;
-                  const pct=Math.round(cnt/localWines.length*100);
-                  return <div key={id} style={{marginBottom:7}}>
-                    <div style={{display:'flex',justifyContent:'space-between',fontSize:11,marginBottom:2}}><span style={{color:C.text}}>{l}</span><span style={{color:C.wine,fontWeight:600}}>{cnt} ({pct}%)</span></div>
-                    <div style={{background:'rgba(107,31,42,.08)',borderRadius:50,height:5,overflow:'hidden'}}><div style={{height:'100%',borderRadius:50,background:'linear-gradient(90deg,'+C.gold+','+C.gold2+')',width:pct+'%'}}/></div>
-                  </div>;
-                })}
-              </div>
-            </div>
-            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
-              <div style={{background:C.cream,border:'1px solid '+C.bord,borderRadius:11,padding:'13px'}}>
-                <div style={{...serif,fontSize:14,color:C.wine,marginBottom:9}}>Plus gros stocks</div>
-                {topStock.map((w,i)=><div key={w.id} style={{display:'flex',alignItems:'center',gap:7,padding:'4px 0',borderBottom:i<4?'1px solid '+C.bord:'none'}}>
-                  <span style={{fontSize:10,fontWeight:700,color:C.gold,width:14}}>{i+1}</span>
-                  <Bottle wine={w} h={34} label={false}/>
-                  <div style={{flex:1,minWidth:0}}><div style={{fontSize:11,fontWeight:600,color:C.wine,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{w.name}</div><div style={{fontSize:10,color:C.muted}}>{w.price}€</div></div>
-                  <span style={{fontSize:11,color:C.light,fontWeight:700}}>{w.stock}</span>
-                </div>)}
-              </div>
-              <div style={{background:C.cream,border:'1px solid '+C.bord,borderRadius:11,padding:'13px'}}>
-                <div style={{...serif,fontSize:14,color:C.wine,marginBottom:9}}>Top 5 premium</div>
-                {topPriced.map((w,i)=><div key={w.id} style={{display:'flex',alignItems:'center',gap:7,padding:'4px 0',borderBottom:i<4?'1px solid '+C.bord:'none'}}>
-                  <span style={{fontSize:10,fontWeight:700,color:C.gold,width:14}}>{i+1}</span>
-                  <Bottle wine={w} h={34} label={false}/>
-                  <div style={{flex:1,minWidth:0}}><div style={{fontSize:11,fontWeight:600,color:C.wine,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{w.name}</div><div style={{fontSize:10,color:C.muted}}>{w.region}</div></div>
-                  <span style={{...serif,fontSize:12,color:C.wine,fontWeight:700}}>{w.price}€</span>
-                </div>)}
-              </div>
-            </div>
           </div>
-        )}
-
-        {tab==='wines'&&(
+        ) : (
           <div>
-            <div style={{...serif,fontSize:19,color:C.wine,marginBottom:12}}>Catalogue — {filtered.length} vins</div>
-            {overstockSuggestions.length>0&&(
-              <div style={{background:'rgba(212,175,55,.08)',border:'1px solid '+C.gold,borderRadius:12,padding:'11px 13px',marginBottom:11}}>
-                <div style={{fontSize:11,fontWeight:700,color:C.light,textTransform:'uppercase',letterSpacing:'.04em',marginBottom:8}}>Suggestions — stock élevé pour leur tranche</div>
-                <div style={{display:'flex',flexDirection:'column',gap:6}}>
-                  {overstockSuggestions.map(w=>(
-                    <div key={w.id} style={{display:'flex',alignItems:'center',gap:8,background:'#fff',border:'1px solid '+C.bord,borderRadius:8,padding:'6px 10px'}}>
-                      <div style={{flex:1,minWidth:0}}>
-                        <div style={{fontSize:12,fontWeight:600,color:C.wine,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{w.name}</div>
-                        <div style={{fontSize:10,color:C.muted}}>{w.stock} bouteilles · {w.price}€ · tranche {w.budget==='50+'?'50€+':w.budget+'€'}</div>
-                      </div>
-                      <button onClick={()=>applySuggestion(w)} style={{background:C.gold,color:'#fff',border:'none',borderRadius:50,padding:'5px 12px',fontSize:11,cursor:'pointer',fontFamily:'Montserrat,sans-serif',fontWeight:600,flexShrink:0}}>✓ Mettre en avant</button>
-                    </div>
-                  ))}
+            {message(erreur, true)}
+            {message(info, false)}
+            <div style={cadre}>
+              {titre('État')}
+              {ligne('Mode', etat.mode === 'connecte' ? 'Connectée au serveur WineSelect' : 'Autonome (démonstration)')}
+              {etat.magasin && ligne('Magasin', etat.magasin)}
+              {etat.serveur && ligne('Serveur', etat.serveur)}
+              {etat.jeton && ligne('Jeton', etat.jeton)}
+              {ligne('Catalogue', etat.catalogue.vins + ' vins' + (etat.catalogue.version ? ' · version ' + etat.catalogue.version : ''), !etat.catalogue.vins)}
+              {etat.synchro && ligne('Serveur joignable', etat.synchro.joignable ? 'oui' : (etat.synchro.joignable === false ? 'non' : 'pas encore vérifié'), etat.synchro.joignable === false)}
+              {etat.synchro && ligne('Dernière synchronisation', dateHeure(etat.synchro.derniere))}
+              {etat.synchro && etat.synchro.erreur && ligne('Dernière erreur', etat.synchro.erreur, true)}
+              {ligne('Sommelier', etat.sommelier)}
+              {etat.mode === 'connecte' && !etat.codeDepannageDefini && ligne('Code de dépannage', 'non défini', true)}
+              {ligne('Version de la borne', etat.versionBorne)}
+              <div style={{display:'flex', gap:10, flexWrap:'wrap', marginTop:16}}>
+                {etat.mode === 'connecte' && bouton('Synchroniser maintenant', () => action(async () => { setEtat(await appel('synchroniser', {})); setInfo('Synchronisation terminée.'); }), true)}
+                {bouton('Tester le sommelier', () => action(async () => { setTest(null); setTest(await appel('tester', {})); }), etat.mode !== 'connecte')}
+              </div>
+            </div>
+
+            {test && (
+              <div style={cadre}>
+                {titre('Test du sommelier')}
+                <div style={{fontSize:14, color:I.body, lineHeight:1.7}}>
+                  <div>{test.demande + ' · réponse en ' + (test.duree / 1000).toFixed(1).replace('.', ',') + ' s'}</div>
+                  <div>{'Source : ' + test.source}</div>
+                  {(test.vins || []).map((v, i) => <div key={i} style={{color:I.ink, fontWeight:500}}>{(i + 1) + '. ' + v}</div>)}
+                  {!test.ok && <div style={{color:'#9b2c2c'}}>{test.error || 'Le sommelier n\'a pas proposé 3 vins.'}</div>}
                 </div>
               </div>
             )}
-            <div style={{background:C.cream,border:'1px solid '+C.bord,borderRadius:12,padding:'11px 13px',marginBottom:11}}>
-              <input style={{width:'100%',background:C.bg,border:'1px solid '+C.bord,color:C.text,borderRadius:8,padding:'7px 11px',fontSize:13,outline:'none',fontFamily:'Montserrat,sans-serif',marginBottom:8}} value={search} onChange={e=>setSearch(e.target.value)} placeholder="Nom, région, cépage..."/>
-              <div style={{display:'flex',gap:5,flexWrap:'wrap',marginBottom:6}}>
-                {['all','rouge','blanc','rosé','bulles'].map(f=>(
-                  <button key={f} onClick={()=>setTypeFilter(f)} style={{background:typeFilter===f?C.wine:C.cream,color:typeFilter===f?'#fdf8f0':C.wine,border:'1.5px solid '+(typeFilter===f?C.wine:C.bord),borderRadius:50,padding:'4px 12px',fontSize:11,cursor:'pointer',fontFamily:'Montserrat,sans-serif'}}>
-                    {f==='all'?'Tous':f.charAt(0).toUpperCase()+f.slice(1)}
-                  </button>
-                ))}
-              </div>
-              <div style={{display:'flex',gap:5,flexWrap:'wrap',alignItems:'center'}}>
-                {[['all','Tous'],['-8','moins de 8€'],['8-15','8-15€'],['15-25','15-25€'],['25-50','25-50€'],['50+','50€+']].map(([id,l])=>(
-                  <button key={id} onClick={()=>setBudgetFilter(id)} style={{background:budgetFilter===id?'rgba(212,175,55,.2)':C.cream,color:budgetFilter===id?C.light:C.muted,border:'1.5px solid '+(budgetFilter===id?C.gold:C.bord),borderRadius:50,padding:'4px 10px',fontSize:11,cursor:'pointer',fontFamily:'Montserrat,sans-serif'}}>{l}</button>
-                ))}
-                <select value={sortBy} onChange={e=>setSortBy(e.target.value)} style={{marginLeft:'auto',background:C.bg,border:'1px solid '+C.bord,borderRadius:50,padding:'4px 10px',fontSize:11,color:C.text,cursor:'pointer',fontFamily:'Montserrat,sans-serif',outline:'none'}}>
-                  <option value="price_desc">Prix ↓</option>
-                  <option value="price_asc">Prix ↑</option>
-                  <option value="stock_asc">Stock ↑</option>
-                  <option value="name">A→Z</option>
-                </select>
-              </div>
-            </div>
-            <div style={{fontSize:11,color:C.muted,marginBottom:7}}>{filtered.length} vin{filtered.length>1?'s':''}</div>
-            <div style={{display:'flex',flexDirection:'column',gap:5}}>
-              {filtered.map(w=>(
-                <div key={w.id} style={{background:C.cream,border:'1.5px solid '+(expanded===w.id?C.gold:w.stock<5?'#f5c6cb':C.bord),borderRadius:10,overflow:'hidden'}}>
-                  <div onClick={()=>setExpanded(expanded===w.id?null:w.id)} style={{display:'flex',alignItems:'center',gap:8,padding:'8px 12px',cursor:'pointer'}}>
-                    <Bottle wine={w} h={36} label={false}/>
-                    <div style={{flex:1,minWidth:0}}>
-                      <div style={{...serif,fontSize:13,fontWeight:700,color:C.wine,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{w.name}</div>
-                      <div style={{fontSize:11,color:C.muted}}>{w.region} · {w.type}</div>
-                    </div>
-                    <div style={{display:'flex',alignItems:'center',gap:7,flexShrink:0}}>
-                      {w.stock<10&&<span style={{fontSize:9,background:'#f8d7da',color:'#721c24',borderRadius:50,padding:'2px 6px',fontWeight:600}}>{w.stock}</span>}
-                      <div style={{textAlign:'right'}}><div style={{...serif,fontSize:14,fontWeight:700,color:C.wine}}>{w.price}€</div><div style={{fontSize:9,color:C.light}}>{w.stock} btl{margeDe(w)!==null ? ' · marge ' + fmtEuro(margeDe(w)) : ''}</div></div>
-                      <span style={{color:C.light,fontSize:10,transition:'transform .2s',display:'inline-block',transform:expanded===w.id?'rotate(180deg)':'none'}}>▼</span>
-                    </div>
-                  </div>
-                  {expanded===w.id&&(
-                    <div style={{borderTop:'1px solid '+C.bord,padding:'11px 13px',background:'rgba(212,175,55,.03)'}}>
-                      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:7,marginBottom:9}}>
-                        {[['Appellation',w.appellation||'-'],['Cépage',w.grape||'-'],['Stock',w.stock+' bouteilles'],['Budget',w.budget==='50+'?'50€+':w.budget+'€'],
-                          ["Prix d'achat", prixAchat[w.id] ? fmtEuro(prixAchat[w.id]) : 'non renseigné'],
-                          ['Marge brute', margeDe(w)!==null ? fmtEuro(margeDe(w)) + ' (' + Math.round(margeDe(w) / w.price * 100) + ' % du prix)' : '—'],
-                          ['Domaine', w.domaine||'non renseigné'], ['Cuvée', w.cuvee||'non renseignée'], ['Millésime', w.millesime||'non renseigné'],
-                          ['Emplacement en rayon', w.emplacement||'non renseigné'], ['Photo', w.photo||'aucune (illustration)']].map(([k,v])=>(
-                          <div key={k}><div style={{fontSize:10,color:C.muted,marginBottom:2}}>{k}</div><div style={{fontSize:12,color:C.wine,fontWeight:500}}>{v}</div></div>
-                        ))}
-                      </div>
-                      {w.pairings&&w.pairings.length>0&&<div style={{marginBottom:8}}><div style={{fontSize:10,color:C.muted,marginBottom:4}}>Accords</div><div style={{display:'flex',gap:4,flexWrap:'wrap'}}>{w.pairings.map(p=><span key={p} style={{fontSize:10,background:'rgba(107,31,42,.07)',color:C.wine,padding:'2px 7px',borderRadius:50}}>{p}</span>)}</div></div>}
-                      <div style={{fontSize:11,fontStyle:'italic',color:C.muted,lineHeight:1.5,marginBottom:9}}>{w.tastingNotes}</div>
-                      <div style={{display:'flex',gap:7,alignItems:'center',flexWrap:'wrap'}}>
-                        <button onClick={()=>setEditWine({...w})} style={{background:'rgba(107,31,42,.07)',color:C.wine,border:'1px solid '+C.bord,borderRadius:50,padding:'5px 13px',fontSize:11,cursor:'pointer',fontFamily:'Montserrat,sans-serif'}}>Stock</button>
-                        <button onClick={()=>{setLocalWines(p=>{const next=p.map(x=>x.id===w.id?{...x,featured:!x.featured,featuredReason:!x.featured?(x.featuredReason||'stock'):x.featuredReason}:x);persistOverrides(next);return next;});notify(w.featured?'Retiré de la sélection':'Ajouté à la sélection');}} style={{background:'rgba(212,175,55,.1)',color:C.light,border:'1px solid '+C.gold,borderRadius:50,padding:'5px 13px',fontSize:11,cursor:'pointer',fontFamily:'Montserrat,sans-serif'}}>{w.featured?'Retirer':'Sélection'}</button>
-                        {w.featured&&(
-                          <select value={w.featuredReason||'stock'} onChange={e=>{const val=e.target.value;setLocalWines(p=>{const next=p.map(x=>x.id===w.id?{...x,featuredReason:val}:x);persistOverrides(next);return next;});}}
-                            style={{fontSize:11,color:C.wine,border:'1px solid '+C.bord,borderRadius:50,padding:'5px 10px',background:'#fff',fontFamily:'Montserrat,sans-serif',cursor:'pointer'}}>
-                            {Object.entries(FEATURED_REASONS).map(([k,label])=><option key={k} value={k}>{label}</option>)}
-                          </select>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
 
-        {tab==='stocks'&&(
-          <div>
-            <div style={{...serif,fontSize:19,color:C.wine,marginBottom:6}}>Gestion des stocks</div>
-            {lowStockW.length===0
-              ? <div style={{textAlign:'center',padding:'40px 0'}}><div style={{fontSize:44,marginBottom:8}}></div><div style={{...serif,fontSize:16,color:C.wine}}>Tous les stocks sont bons</div></div>
-              : <>
-                  <div style={{background:'#fff3cd',border:'1px solid #ffc107',borderRadius:11,padding:'11px 14px',marginBottom:14,fontSize:13,color:'#856404'}}><strong>{lowStockW.length} vin{lowStockW.length>1?'s':''}</strong> avec stock inférieur à 10 bouteilles</div>
-                  <div style={{display:'flex',flexDirection:'column',gap:7}}>
-                    {lowStockW.map(w=>(
-                      <div key={w.id} style={{background:C.cream,border:'1.5px solid '+(w.stock<3?'#f5c6cb':'#ffc107'),borderRadius:11,padding:'11px 13px',display:'flex',alignItems:'center',gap:9}}>
-                        <Bottle wine={w} h={44} label={false}/>
-                        <div style={{flex:1}}><div style={{...serif,fontSize:13,fontWeight:700,color:C.wine}}>{w.name}</div><div style={{fontSize:11,color:C.muted}}>{w.region} · {w.price}€</div></div>
-                        <div style={{textAlign:'center',minWidth:52}}><div style={{fontSize:20,fontWeight:700,color:w.stock<3?'#b91c1c':'#856404'}}>{w.stock}</div><div style={{fontSize:9,color:C.muted}}>btl.</div></div>
-                        <button onClick={()=>setEditWine({...w})} style={{background:C.wine,color:'#fdf8f0',border:'none',borderRadius:50,padding:'6px 13px',fontSize:11,cursor:'pointer',fontFamily:'Montserrat,sans-serif'}}>Ajuster</button>
-                      </div>
-                    ))}
-                  </div>
-                </>
-            }
-          </div>
-        )}
-
-        {tab==='stats'&&(
-          <div>
-            <div style={{...serif,fontSize:19,color:C.wine,marginBottom:14}}>Statistiques</div>
-            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:9,marginBottom:14}}>
-              {[['Valeur totale',totalValue+'€',''],['Prix médian',[...localWines].sort((a,b)=>a.price-b.price)[Math.floor(localWines.length/2)]?.price+'€',''],['Bouteilles',localWines.reduce((s,w)=>s+w.stock,0),'']].map(([l,v,i])=>(
-                <div key={l} style={{background:C.cream,border:'1px solid '+C.bord,borderRadius:11,padding:'12px 8px',textAlign:'center'}}>
-                  <div style={{fontSize:20,marginBottom:3}}>{i}</div>
-                  <div style={{...serif,fontSize:15,fontWeight:700,color:C.wine}}>{v}</div>
-                  <div style={{fontSize:10,color:C.muted,marginTop:2}}>{l}</div>
-                </div>
-              ))}
-            </div>
-            <div style={{background:C.cream,border:'1px solid '+C.bord,borderRadius:11,padding:'14px',marginBottom:11}}>
-              <div style={{...serif,fontSize:14,color:C.wine,marginBottom:11}}>Distribution des prix</div>
-              {[['moins de 8€',w=>w.price<8],['8-15€',w=>w.price>=8&&w.price<15],['15-25€',w=>w.price>=15&&w.price<25],['25-50€',w=>w.price>=25&&w.price<50],['50€+',w=>w.price>=50]].map(([label,fn])=>{
-                const cnt=localWines.filter(fn).length;
-                const pct=Math.round(cnt/localWines.length*100);
-                return <div key={label} style={{marginBottom:9}}>
-                  <div style={{display:'flex',justifyContent:'space-between',fontSize:11,marginBottom:3}}><span style={{color:C.text}}>{label}</span><span style={{color:C.wine,fontWeight:600}}>{cnt} ({pct}%)</span></div>
-                  <div style={{background:'rgba(107,31,42,.08)',borderRadius:50,height:7,overflow:'hidden'}}><div style={{height:'100%',borderRadius:50,background:'linear-gradient(90deg,'+C.wine+','+C.wine2+')',width:pct+'%',transition:'width .5s'}}/></div>
-                </div>;
-              })}
-            </div>
-            <div style={{background:C.cream,border:'1px solid '+C.bord,borderRadius:11,padding:'14px'}}>
-              <div style={{...serif,fontSize:14,color:C.wine,marginBottom:11}}>Couverture par accord</div>
-              {PAIRINGS.map(p=>{
-                const cnt=localWines.filter(w=>(w.pairings||[]).includes(p.id)).length;
-                const pct=Math.round(cnt/localWines.length*100);
-                return <div key={p.id} style={{display:'flex',alignItems:'center',gap:7,marginBottom:7}}>
-                  <span style={{width:20,display:'flex',justifyContent:'center'}}><PairingIcon id={p.id} size={15}/></span>
-                  <span style={{fontSize:11,color:C.text,width:100}}>{p.label}</span>
-                  <div style={{flex:1,background:'rgba(107,31,42,.08)',borderRadius:50,height:5,overflow:'hidden'}}><div style={{height:'100%',borderRadius:50,background:'linear-gradient(90deg,'+C.gold+','+C.gold2+')',width:pct+'%'}}/></div>
-                  <span style={{fontSize:11,color:C.wine,fontWeight:600,width:28,textAlign:'right'}}>{cnt}</span>
-                </div>;
-              })}
-            </div>
-          </div>
-        )}
-
-        {tab==='reviews'&&(
-          <div>
-            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14}}>
-              <div style={{...serif,fontSize:19,color:C.wine}}>Avis clients</div>
-              {ratedWines.length>0&&<button onClick={exportReviewsCSV} style={{background:C.wine,color:'#fdf8f0',border:'none',borderRadius:50,padding:'7px 16px',fontSize:12,cursor:'pointer',fontFamily:'Montserrat,sans-serif'}}>Export CSV</button>}
-            </div>
-            <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:9,marginBottom:16}}>
-              {[['Clients inscrits',nbClients,''],['Avis déposés',totalReviews,''],['Note moyenne',totalReviews?globalAvg.toFixed(1)+'/5':'—',''],['Vins notés',ratedWines.length,'']].map(([l,v,i])=>(
-                <div key={l} style={{background:C.cream,border:'1px solid '+C.bord,borderRadius:11,padding:'12px 8px',textAlign:'center'}}>
-                  <div style={{fontSize:20}}>{i}</div>
-                  <div style={{...serif,fontSize:18,fontWeight:700,color:C.wine}}>{v}</div>
-                  <div style={{fontSize:10,color:C.muted,marginTop:2}}>{l}</div>
-                </div>
-              ))}
-            </div>
-            {ratedWines.length===0?(
-              <div style={{background:C.cream,border:'1px solid '+C.bord,borderRadius:11,padding:'34px 18px',textAlign:'center'}}>
-                <div style={{fontSize:40,marginBottom:9}}></div>
-                <div style={{...serif,fontSize:16,color:C.wine,marginBottom:6}}>Aucun avis pour le moment</div>
-                <p style={{fontSize:12,color:C.muted,lineHeight:1.6}}>Les notes laissées par les clients connectés (carte pass) sur les vins de leur collection apparaîtront ici, pour vous aider à ajuster le stock selon ce qui plaît vraiment.</p>
-              </div>
-            ):(
-              <div style={{background:C.cream,border:'1px solid '+C.bord,borderRadius:11,overflow:'hidden'}}>
-                {ratedWines.map((r,idx)=>(
-                  <div key={r.wine.id} style={{display:'flex',alignItems:'center',gap:10,padding:'10px 14px',borderBottom:idx<ratedWines.length-1?'1px solid '+C.bord:'none'}}>
-                    <span style={{flexShrink:0}}><TypeIcon id={r.wine.type} color={(TYPES.find(t=>t.id===r.wine.type)||{}).color} size={17}/></span>
-                    <div style={{flex:1,minWidth:0}}>
-                      <div style={{...serif,fontSize:13,fontWeight:700,color:C.wine,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{r.wine.name}</div>
-                      <div style={{fontSize:10,color:C.muted}}>{r.wine.region} · {r.wine.price}€ · stock {r.wine.stock}</div>
-                    </div>
-                    <div style={{textAlign:'right',flexShrink:0}}>
-                      <div style={{fontSize:12,color:C.gold2,letterSpacing:1}}>{'★'.repeat(Math.round(r.avg))}{'☆'.repeat(5-Math.round(r.avg))}</div>
-                      <div style={{fontSize:10,color:C.muted}}>{r.avg.toFixed(1)}/5 · {r.count} avis</div>
-                    </div>
-                    {r.avg>=4&&<span style={{flexShrink:0,fontSize:9,fontWeight:700,background:'#d4edda',color:'#155724',borderRadius:50,padding:'3px 9px'}}>TOP</span>}
-                    {r.avg<=2.5&&<span style={{flexShrink:0,fontSize:9,fontWeight:700,background:'#f8d7da',color:'#721c24',borderRadius:50,padding:'3px 9px'}}>À REVOIR</span>}
-                  </div>
-                ))}
-              </div>
-            )}
-            {ratedWines.some(r=>r.avg<=2.5)&&(
-              <div style={{background:'#fff8f0',border:'1px solid #f5d9c6',borderRadius:8,padding:'9px 13px',fontSize:12,color:'#8a4b1f',marginTop:11}}>Les vins « À revoir » sont peu appréciés par vos clients : pensez à réduire leur réassort ou à les remplacer.</div>
-            )}
-          </div>
-        )}
-
-        {tab==='config'&&(
-          <div style={{display:'flex',flexDirection:'column',gap:11}}>
-            <div style={{...serif,fontSize:19,color:C.wine,marginBottom:4}}>Configuration</div>
-            <div style={{background:C.cream,border:'1px solid '+C.bord,borderRadius:11,padding:'14px'}}>
-              <div style={{...serif,fontSize:14,color:C.wine,marginBottom:6}}>Stratégie de recommandation</div>
-              <p style={{fontSize:12,color:C.muted,marginBottom:11,lineHeight:1.6}}>Le sommelier choisit toujours d'abord les vins les mieux accordés à la demande du client, dans son budget. La stratégie sert uniquement à départager des vins également pertinents ; elle ne change jamais ce que le sommelier dit des vins.</p>
-              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
-                {STRATEGIES_RECO.map(s => {
-                  const actif = strategie === s.id;
-                  return (
-                    <button key={s.id} onClick={() => choisirStrategie(s.id)} style={{textAlign:'left', background:actif ? '#fef9ed' : C.bg, border:'1.5px solid ' + (actif ? C.gold : C.bord), borderRadius:10, padding:'10px 12px', cursor:'pointer', fontFamily:'Montserrat,sans-serif'}}>
-                      <div style={{fontSize:12, fontWeight:700, color:C.wine, marginBottom:3}}>{actif ? '● ' : '○ '}{s.label}{s.id === 'neutre' ? ' (par défaut)' : ''}</div>
-                      <div style={{fontSize:11, color:C.muted, lineHeight:1.45}}>{s.desc}</div>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-            <div style={{background:C.cream,border:'1px solid '+C.bord,borderRadius:11,padding:'14px'}}>
-              <div style={{...serif,fontSize:14,color:C.wine,marginBottom:6}}>Import du stock magasin (Excel / CSV)</div>
-              <p style={{fontSize:12,color:C.muted,marginBottom:11,lineHeight:1.6}}>Mettez à jour le stock de ce magasin en une fois : depuis Excel, enregistrez votre fichier au format CSV avec les colonnes <strong>id;nom;stock;prix;prix_achat</strong> (ou simplement <strong>id;stock</strong>), puis importez-le ici. Les lignes inconnues sont ignorées.</p>
-              <p style={{fontSize:12,color:C.muted,marginBottom:11,lineHeight:1.6}}>La colonne <strong>prix_achat</strong> est facultative : elle sert uniquement à la stratégie « Marge » et à l'affichage de la marge dans l'onglet Catalogue. Elle reste confidentielle : jamais montrée aux clients ni transmise au sommelier.</p>
-              <p style={{fontSize:12,color:C.muted,marginBottom:11,lineHeight:1.6}}>Fiche produit, également facultative : colonnes <strong>domaine</strong>, <strong>cuvee</strong>, <strong>millesime</strong>, <strong>photo</strong> (ex. photos/123.jpg, image placée dans le dossier photos de la borne) et <strong>emplacement</strong> (ex. Allée 12 · Étagère 3). Elles s'affichent sur l'écran des résultats et dans la fiche du vin. Une cellule vide ne modifie rien.</p>
-              <div style={{display:'flex',gap:9,alignItems:'center',flexWrap:'wrap'}}>
-                <input type="file" accept=".csv,.txt" onChange={e=>{handleCSVImport(e.target.files[0]); e.target.value='';}} style={{fontSize:12,fontFamily:'Montserrat,sans-serif',color:C.text}}/>
-                <button onClick={telechargerModeleCSV} style={{background:'transparent',color:C.wine,border:'1px solid '+C.bord2,borderRadius:50,padding:'7px 14px',fontSize:12,cursor:'pointer',fontFamily:'Montserrat,sans-serif'}}>Télécharger le modèle (catalogue actuel)</button>
-              </div>
-              <div style={{background:'#f0f4ff',border:'1px solid #d0d8ff',borderRadius:8,padding:'9px 13px',fontSize:12,color:'#4040a0',marginTop:11}}>Les stocks importés sont conservés sur la borne, même après redémarrage.</div>
-            </div>
-            <div style={{background:C.cream,border:'1px solid '+C.bord,borderRadius:11,padding:'14px'}}>
-              <div style={{...serif,fontSize:14,color:C.wine,marginBottom:6}}>Sauvegarde serveur</div>
-              <p style={{fontSize:12,color:C.muted,marginBottom:11,lineHeight:1.6}}>Les profils clients, notes et stocks sont automatiquement copiés sur le serveur à chaque modification. Si la borne a été réinstallée ou le cache du navigateur vidé, restaurez la dernière copie sauvegardée ici.</p>
-              <div style={{display:'flex',gap:9,flexWrap:'wrap'}}>
-                <button onClick={async()=>{
-                  const r = await restoreFromServer();
-                  if(r.profiles||r.ratings||r.stock){ notify('Données restaurées depuis le serveur — rechargement...'); setTimeout(()=>window.location.reload(), 1200); }
-                  else { notify('Aucune sauvegarde serveur trouvée','error'); }
-                }} style={{background:C.wine,color:'#fdf8f0',border:'none',borderRadius:50,padding:'8px 16px',fontSize:12,cursor:'pointer',fontFamily:'Montserrat,sans-serif'}}>Restaurer depuis le serveur</button>
-                <button onClick={exportDataJSON} style={{background:'transparent',color:C.wine,border:'1px solid '+C.bord2,borderRadius:50,padding:'8px 16px',fontSize:12,cursor:'pointer',fontFamily:'Montserrat,sans-serif'}}>Exporter mes données (JSON)</button>
-              </div>
-            </div>
-            {[{title:'Magasin',fields:[['Nom','Carrefour Paris Bastille'],['Adresse','12 Rue de la Roquette, 75011'],['Responsable','Jean Dupont'],['Email','paris@wineselect.fr']]},{title:'Programme fidélité',fields:[['Seuil bronze','5 cartes'],['Réduction bronze','5%'],['Seuil argent','10 cartes'],['Réduction argent','10%'],['Seuil or','20 cartes'],['Réduction or','15%']]}].map(({title,fields})=>(
-              <div key={title} style={{background:C.cream,border:'1px solid '+C.bord,borderRadius:11,padding:'14px'}}>
-                <div style={{...serif,fontSize:14,color:C.wine,marginBottom:11}}>{title}</div>
-                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:9,marginBottom:10}}>
-                  {fields.map(([l,v])=>(
-                    <div key={l}><div style={{fontSize:10,color:C.muted,marginBottom:3}}>{l}</div>
-                    <input defaultValue={v} style={{width:'100%',background:C.bg,border:'1px solid '+C.bord,color:C.text,borderRadius:7,padding:'7px 10px',fontSize:12,outline:'none',fontFamily:'Montserrat,sans-serif'}}/></div>
-                  ))}
-                </div>
-                <button onClick={()=>notify('Sauvegardé')} style={{background:C.wine,color:'#fdf8f0',border:'none',borderRadius:50,padding:'7px 18px',fontSize:12,cursor:'pointer',fontFamily:'Montserrat,sans-serif'}}>Sauvegarder</button>
-              </div>
-            ))}
-            <div style={{background:C.cream,border:'1px solid '+C.bord,borderRadius:11,padding:'14px'}}>
-              <div style={{...serif,fontSize:14,color:C.wine,marginBottom:6}}>Intégration logiciel de caisse</div>
-              <p style={{fontSize:12,color:C.muted,marginBottom:11,lineHeight:1.6}}>Connectez WineSelect à votre logiciel de caisse pour valider automatiquement les achats.</p>
-              <div style={{display:'flex',gap:7,flexWrap:'wrap',marginBottom:11}}>
-                {['Lightspeed','Tiller','Zelty','Storeline','Autre'].map(s=>(
-                  <button key={s} onClick={()=>notify('Contactez-nous pour configurer '+s)} style={{background:C.bg,border:'1px solid '+C.bord,color:C.wine,borderRadius:50,padding:'5px 13px',fontSize:11,cursor:'pointer',fontFamily:'Montserrat,sans-serif'}}>{s}</button>
-                ))}
-              </div>
-              <div style={{background:'#f0f4ff',border:'1px solid #d0d8ff',borderRadius:8,padding:'9px 13px',fontSize:12,color:'#4040a0'}}>L'intégration caisse permet la validation automatique des achats pour le programme collectors.</div>
-            </div>
-            <div style={{background:C.cream,border:'1px solid '+C.bord,borderRadius:11,padding:'14px'}}>
-              <div style={{...serif,fontSize:14,color:C.wine,marginBottom:6}}>Sommelier — IA</div>
-              <div style={{marginBottom:9}}><div style={{fontSize:11,color:C.muted,marginBottom:4}}>Prestataire IA</div>
-                <select defaultValue="mistral" style={{width:'100%',background:C.bg,border:'1px solid '+C.bord,color:C.text,borderRadius:7,padding:'7px 10px',fontSize:13,outline:'none',fontFamily:'Montserrat,sans-serif'}}>
-                  <option value="mistral">Mistral AI</option><option value="openai">OpenAI GPT-4o</option><option value="anthropic">Anthropic Claude</option>
-                </select>
-              </div>
-              <button onClick={()=>notify('Configuration sauvegardée')} style={{background:C.wine,color:'#fdf8f0',border:'none',borderRadius:50,padding:'7px 18px',fontSize:12,cursor:'pointer',fontFamily:'Montserrat,sans-serif'}}>Sauvegarder</button>
+            <div style={cadre}>
+              {titre(etat.mode === 'connecte' ? 'Changer de jeton' : 'Installer la borne')}
+              <div style={{fontSize:14, color:I.body, lineHeight:1.6, marginBottom:14}}>Jeton créé dans l'espace super admin (fiche du magasin, « Ajouter une borne »). Il commence par « wsb_ ».</div>
+              <label style={{display:'block', fontSize:13, color:I.body, marginBottom:6}}>Adresse du serveur</label>
+              <input value={install.serveur} onChange={e => setInstall(Object.assign({}, install, {serveur: e.target.value}))}
+                style={{...sans, width:'100%', minHeight:50, padding:'0 16px', fontSize:15, borderRadius:14, border:'1px solid ' + I.bord2, background:I.bg, color:I.ink, marginBottom:14, boxSizing:'border-box'}}/>
+              <label style={{display:'block', fontSize:13, color:I.body, marginBottom:6}}>Jeton de la borne</label>
+              <textarea value={install.jeton} onChange={e => setInstall(Object.assign({}, install, {jeton: e.target.value.replace(/\s/g, '')}))} rows={3}
+                style={{...sans, width:'100%', padding:'12px 16px', fontSize:14, borderRadius:14, border:'1px solid ' + I.bord2, background:I.bg, color:I.ink, marginBottom:14, boxSizing:'border-box', fontFamily:'monospace', wordBreak:'break-all'}}/>
+              {installe
+                ? bouton('Recharger l\'écran avec le catalogue du magasin', () => window.location.reload(), true)
+                : bouton(etat.mode === 'connecte' ? 'Enregistrer le nouveau jeton' : 'Installer', () => action(async () => {
+                  const e = await appel('installer', {serveur: install.serveur, jeton: install.jeton});
+                  setEtat(e); setInstalle(true); setInstall(Object.assign({}, install, {jeton: ''}));
+                  setInfo('Borne installée pour « ' + (e.magasin || 'le magasin') + ' » (' + e.catalogue.vins + ' vins). Rechargez l\'écran.');
+                }), true, !install.jeton)}
             </div>
           </div>
         )}
       </div>
-
-      {editWine&&(
-        <div style={{position:'fixed',inset:0,background:'rgba(58,16,8,.6)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:300,padding:16}} onClick={()=>setEditWine(null)}>
-          <div style={{background:C.cream,borderRadius:15,border:'1px solid '+C.bord,padding:22,maxWidth:340,width:'100%'}} onClick={e=>e.stopPropagation()}>
-            <div style={{...serif,fontSize:17,color:C.wine,marginBottom:3}}>{editWine.name}</div>
-            <div style={{fontSize:12,color:C.muted,marginBottom:14}}>{editWine.region} · {editWine.price}€</div>
-            <div style={{marginBottom:14}}>
-              <div style={{fontSize:12,color:C.muted,marginBottom:6}}>Stock actuel : <strong style={{color:C.wine}}>{editWine.stock}</strong> bouteilles</div>
-              <input type="number" id="newStock" defaultValue={editWine.stock} min="0" style={{width:'100%',background:C.bg,border:'1px solid '+C.bord,color:C.text,borderRadius:8,padding:'9px 12px',fontSize:16,outline:'none',fontFamily:'Montserrat,sans-serif'}}/>
-            </div>
-            <div style={{display:'flex',gap:9}}>
-              <button onClick={()=>{const v=parseInt(document.getElementById('newStock').value)||0;setLocalWines(p=>{const next=p.map(x=>x.id===editWine.id?{...x,stock:v}:x);persistOverrides(next);return next;});setEditWine(null);notify('Stock mis à jour : '+v+' bouteilles');}} style={{flex:1,background:C.wine,color:'#fdf8f0',border:'none',borderRadius:50,padding:10,cursor:'pointer',fontFamily:'Montserrat,sans-serif',fontSize:13,fontWeight:600}}>Valider</button>
-              <button onClick={()=>setEditWine(null)} style={{flex:1,background:'transparent',color:C.wine,border:'1px solid '+C.bord,borderRadius:50,padding:10,cursor:'pointer',fontFamily:'Montserrat,sans-serif',fontSize:13}}>Annuler</button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -2726,6 +2221,18 @@ function App() {
   // profil d'un client visible pour le suivant.
   const IDLE_TIMEOUT_MS = 90 * 1000; // 90 secondes — ajustable ici
   const idleTimerRef = useRef(null);
+  const veilleRef = useRef(null);
+
+  // Mode connecté : si le catalogue a changé sur le serveur central, l'écran se
+  // recharge, mais seulement entre deux clients (borne inactive), jamais pendant
+  // une recherche. Vérifié à chaque remise à zéro (elle se répète toutes les
+  // 90 s tant que personne ne touche la borne), et au plus tard toutes les 5 minutes.
+  const verifierCatalogue = useCallback(() => {
+    if (!window.WS_MODE_CONNECTE) return;
+    fetch('/version').then(r => r.json()).then(v => {
+      if (v && v.versionCatalogue && v.versionCatalogue !== window.WS_VERSION_CATALOGUE) window.location.reload();
+    }).catch(() => {});
+  }, []);
 
   const resetForNextCustomer = useCallback(() => {
     customerApi.logout();
@@ -2735,10 +2242,14 @@ function App() {
     // jamais la confirmation d'âge d'un client précédent.
     try{ sessionStorage.removeItem('ws_age_ok'); }catch(e){}
     setAgeOk(false);
-  }, [customerApi]);
+    verifierCatalogue();
+    if (window.WS_MODE_CONNECTE && !veilleRef.current) veilleRef.current = setInterval(verifierCatalogue, 5 * 60 * 1000);
+  }, [customerApi, verifierCatalogue]);
 
   useEffect(() => {
     const scheduleReset = () => {
+      // Un client touche la borne : plus de vérification en veille.
+      if (veilleRef.current) { clearInterval(veilleRef.current); veilleRef.current = null; }
       if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
       idleTimerRef.current = setTimeout(resetForNextCustomer, IDLE_TIMEOUT_MS);
     };
@@ -2771,8 +2282,8 @@ function App() {
       {view==='mystery'   && <Mystery       setView={setView} collector={collector}/>}
       {view==='chat'      && <Chat          setView={setView} collector={collector} customer={customerApi.customer}/>}
       {view==='collector' && <CollectorPage setView={setView} collector={collector} customer={customerApi.customer}/>}
-      {view==='admin'     && <AdminGate setView={setView}><Admin setView={setView}/></AdminGate>}
-      {view!=='home' && view!=='admin' && (
+      {view==='depannage' && <Depannage setView={setView}/>}
+      {view!=='home' && view!=='depannage' && (
         <button
           onClick={()=>{ customerApi.logout(); setResults([]); setView('home'); try{ sessionStorage.removeItem('ws_age_ok'); }catch(e){} setAgeOk(false); }}
           style={{position:'fixed', ...(view==='chat' ? {top:22} : {bottom:56}), right:'max(20px, calc(50% - 316px))', zIndex:50, minHeight:46, background:view==='chat' ? '#ffffff' : C.wine, color:view==='chat' ? C.wine : '#faf6ee', border:'1px solid ' + C.wine, borderRadius:999, padding:'0 22px', fontSize:13, fontWeight:500, letterSpacing:'.03em', cursor:'pointer', boxShadow:view==='chat' ? 'none' : '0 12px 30px rgba(94,22,34,.22)', fontFamily:'Montserrat,sans-serif'}}
