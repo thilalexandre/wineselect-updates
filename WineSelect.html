@@ -623,54 +623,80 @@ function useCollector(customerApi) {
 }
 
 // ── VOICE ─────────────────────────────────────────────────────────────────────
+// Dictée en un seul toucher : le client parle, l'écoute s'arrête d'elle-même dès
+// qu'il marque une pause, et la phrase est transmise (envoyée au sommelier, ou
+// écrite dans le champ). Toucher le micro pendant l'écoute la termine tout de suite.
+// La dictée de Chrome et d'Edge passe par Internet : sans connexion, un message le dit.
 let recog = null;
 let recogTranscript = '';
+let recogInterim = '';
+
+const ERREURS_MICRO = {
+  'no-speech': 'Je n\'ai rien entendu. Touchez le micro et parlez.',
+  'audio-capture': 'Aucun micro détecté sur cet appareil.',
+  'not-allowed': 'Le micro n\'est pas autorisé dans le navigateur.',
+  'service-not-allowed': 'Le micro n\'est pas autorisé dans le navigateur.',
+  'network': 'La dictée a besoin d\'Internet. Vous pouvez écrire votre question.',
+};
 
 function useMic(onResult) {
   const [mic,        setMic]        = useState('off');
   const [transcript, setTranscript] = useState('');
+  const [erreur,     setErreur]     = useState('');
+  const onResultRef = useRef(onResult);
+  onResultRef.current = onResult;
+  const minuteurErreur = useRef(null);
+
+  const afficherErreur = texte => {
+    setErreur(texte);
+    if (minuteurErreur.current) clearTimeout(minuteurErreur.current);
+    minuteurErreur.current = setTimeout(() => setErreur(''), 5000);
+  };
 
   const startListening = () => {
     speechSynthesis.cancel();
+    setErreur('');
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SR) { alert('Micro non supporté — utilisez Chrome'); return; }
-    recog = new SR();
-    recog.lang = 'fr-FR';
-    recog.continuous     = true;
-    recog.interimResults = true;
-    recogTranscript = '';
+    if (!SR) { afficherErreur('La dictée n\'est pas disponible sur ce navigateur. Vous pouvez écrire votre question.'); return; }
+    const r = new SR();
+    recog = r;
+    r.lang = 'fr-FR';
+    r.continuous     = false;   // s'arrête seul à la première pause
+    r.interimResults = true;
+    recogTranscript = ''; recogInterim = '';
 
-    recog.onstart  = () => { setMic('listening'); setTranscript(''); };
+    r.onstart  = () => { setMic('listening'); setTranscript(''); };
 
-    recog.onresult = e => {
+    r.onresult = e => {
       let interim = '';
-      let final   = '';
       for (let i = e.resultIndex; i < e.results.length; i++) {
         const t = e.results[i][0].transcript;
-        if (e.results[i].isFinal) final += t + ' ';
+        if (e.results[i].isFinal) recogTranscript += t + ' ';
         else interim += t;
       }
-      recogTranscript += final;
+      recogInterim = interim;
       setTranscript((recogTranscript + interim).trim());
     };
 
-    recog.onerror = e => {
-      if (e.error !== 'no-speech') { setMic('off'); setTranscript(''); }
+    r.onerror = e => { if (ERREURS_MICRO[e.error]) afficherErreur(ERREURS_MICRO[e.error]); };
+
+    // Fin de l'écoute (pause, toucher du micro ou erreur) : on transmet ce qui a été dit.
+    r.onend = () => {
+      if (recog !== r) return;
+      recog = null;
+      const text = (recogTranscript + recogInterim).trim();
+      recogTranscript = ''; recogInterim = '';
+      setMic('off'); setTranscript('');
+      if (text) onResultRef.current(text, true);
     };
 
-    recog.start();
-  };
-
-  const validate = () => {
-    if (recog) { try { recog.stop(); } catch(e) {} recog = null; }
-    const text = (recogTranscript || transcript).trim();
-    setMic('off'); setTranscript(''); recogTranscript = '';
-    if (text) onResult(text, true);
+    try { r.start(); }
+    catch (e) { recog = null; afficherErreur('Le micro n\'a pas pu démarrer. Réessayez.'); }
   };
 
   const toggle = () => {
     if (mic === 'speaking')  { speechSynthesis.cancel(); setMic('off'); return; }
-    if (mic === 'listening') { validate(); return; }
+    if (mic === 'listening') { if (recog) { try { recog.stop(); } catch(e) {} } return; }
     startListening();
   };
 
@@ -686,7 +712,7 @@ function useMic(onResult) {
     speechSynthesis.speak(u);
   };
 
-  return {mic, toggle, speak, transcript};
+  return {mic, toggle, speak, transcript, erreur};
 }
 
 // ── API ───────────────────────────────────────────────────────────────────────
@@ -1189,7 +1215,7 @@ function Selection({setView, setResults}) {
   const [texte,    setTexte]    = useState('');     // saisie de l'écran « Dites-le »
   const [info,     setInfo]     = useState(null);   // recette sans vin
   const [conseils, setConseils] = useState(null);   // repas : couleurs conseillées pour le plat
-  const {mic, toggle, transcript} = useMic(t => setTexte(prev => (prev ? prev + ' ' : '') + t));
+  const {mic, toggle, transcript, erreur: erreurMicro} = useMic(t => setTexte(prev => (prev ? prev + ' ' : '') + t));
 
   const go = s => { setHist(h => h.concat([screen])); setScreen(s); };
   const back = () => {
@@ -1443,7 +1469,8 @@ function Selection({setView, setResults}) {
                     : <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></svg>}
                 </button>
               </div>
-              {mic === 'listening' && <div style={{fontSize:13, color:C.wine, marginBottom:12, textAlign:'center'}}>Parlez… touchez à nouveau le micro pour terminer</div>}
+              {mic === 'listening' && <div style={{fontSize:13, color:C.wine, marginBottom:12, textAlign:'center'}}>Je vous écoute… le texte s'écrit dès que vous vous arrêtez</div>}
+              {mic !== 'listening' && erreurMicro && <div style={{fontSize:13, color:C.wine, marginBottom:12, textAlign:'center'}}>{erreurMicro}</div>}
               <button onClick={validerLibre} disabled={!(texte || '').trim()} style={{width:'100%', minHeight:56, background:(texte || '').trim() ? C.wine : C.bord, color:C.bg, border:'none', borderRadius:999, cursor:(texte || '').trim() ? 'pointer' : 'default', fontFamily:'Montserrat,sans-serif', fontSize:15, fontWeight:600, letterSpacing:'.03em'}}>Valider</button>
             </div>
             <style>{'@keyframes pulseIv{0%,100%{box-shadow:0 0 0 0 rgba(94,22,34,.35)}50%{box-shadow:0 0 0 10px rgba(94,22,34,0)}}'}</style>
@@ -1735,7 +1762,7 @@ function Chat({setView, collector, customer}) {
   const [modal,   setModal]   = useState(null);
   const [added,   setAdded]   = useState(null);
   const bottomRef = useRef(null);
-  const {mic, toggle, speak, transcript} = useMic((text, isVoice) => send(text, isVoice));
+  const {mic, toggle, speak, transcript, erreur: erreurMicro} = useMic((text, isVoice) => send(text, isVoice));
 
   useEffect(()=>{bottomRef.current?.scrollIntoView({behavior:'smooth'});},[msgs,loading]);
 
@@ -1834,10 +1861,11 @@ function Chat({setView, collector, customer}) {
         </div>
       </div>
 
-      {(mic==='listening'||mic==='speaking') && (
+      {(mic==='listening'||mic==='speaking'||erreurMicro) && (
         <div style={{...sans, textAlign:'center', fontSize:14, padding:'10px 16px', color:I.wine, flexShrink:0, background:I.soft, borderTop:'1px solid ' + I.bord}}>
           {mic==='listening'
-            ? <span>{transcript ? <b style={{fontWeight:600}}>{transcript}</b> : 'Parlez… touchez à nouveau le micro pour envoyer'}</span>
+            ? <span>{transcript ? <b style={{fontWeight:600}}>{transcript}</b> : 'Je vous écoute… votre question part dès que vous vous arrêtez'}</span>
+            : mic!=='speaking' ? <span>{erreurMicro}</span>
             : <span>Le sommelier parle… <button onClick={()=>{speechSynthesis.cancel();}} style={{...sans, marginLeft:10, minHeight:36, background:'transparent', border:'1px solid ' + I.bord2, borderRadius:999, padding:'0 14px', fontSize:12, cursor:'pointer', color:I.wine}}>Arrêter</button></span>}
         </div>
       )}
