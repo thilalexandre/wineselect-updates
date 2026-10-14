@@ -1762,7 +1762,7 @@ function Chat({setView, collector, customer}) {
   const [modal,   setModal]   = useState(null);
   const [added,   setAdded]   = useState(null);
   const bottomRef = useRef(null);
-  const {mic, toggle, speak, transcript, erreur: erreurMicro} = useMic((text, isVoice) => send(text, isVoice));
+  const {mic, toggle, transcript, erreur: erreurMicro} = useMic((text, isVoice) => send(text, isVoice));
 
   useEffect(()=>{bottomRef.current?.scrollIntoView({behavior:'smooth'});},[msgs,loading]);
 
@@ -1777,7 +1777,7 @@ function Chat({setView, collector, customer}) {
     const resp = await askSommelier(history, persoPrompt);
     setMsgs(m=>[...m,{role:'assistant',text:resp.text,wines:resp.wines||[]}]);
     setLoading(false);
-    if (isVoice&&resp) speak(resp.text);
+    // Réponse affichée seulement, jamais lue à voix haute (choix d'Alexandre, octobre 2026) : speak() reste dans useMic si besoin.
   };
 
   const handleCollect = wine => { collector.addWine(wine.id); setAdded(wine.id); setTimeout(()=>setAdded(null),2500); };
