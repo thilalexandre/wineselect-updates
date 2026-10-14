@@ -623,13 +623,15 @@ function useCollector(customerApi) {
 }
 
 // ── VOICE ─────────────────────────────────────────────────────────────────────
-// Dictée en un seul toucher : le client parle, l'écoute s'arrête d'elle-même dès
-// qu'il marque une pause, et la phrase est transmise (envoyée au sommelier, ou
-// écrite dans le champ). Toucher le micro pendant l'écoute la termine tout de suite.
+// Dictée en un seul toucher : le client parle, l'écoute s'arrête d'elle-même après
+// PAUSE_FIN_DICTEE_MS de silence (une hésitation ne coupe pas la phrase), et la
+// phrase est transmise (envoyée au sommelier, ou écrite dans le champ). Toucher le micro pendant l'écoute la termine tout de suite.
 // La dictée de Chrome et d'Edge passe par Internet : sans connexion, un message le dit.
 let recog = null;
 let recogTranscript = '';
 let recogInterim = '';
+let recogMinuteur = null;
+const PAUSE_FIN_DICTEE_MS = 2500;   // silence qui termine la dictée
 
 const ERREURS_MICRO = {
   'no-speech': 'Je n\'ai rien entendu. Touchez le micro et parlez.',
@@ -661,7 +663,7 @@ function useMic(onResult) {
     const r = new SR();
     recog = r;
     r.lang = 'fr-FR';
-    r.continuous     = false;   // s'arrête seul à la première pause
+    r.continuous     = true;    // on décide nous-mêmes de la fin (voir PAUSE_FIN_DICTEE_MS)
     r.interimResults = true;
     recogTranscript = ''; recogInterim = '';
 
@@ -675,6 +677,9 @@ function useMic(onResult) {
         else interim += t;
       }
       recogInterim = interim;
+      // Le client parle encore : on repousse la fin de la dictée.
+      if (recogMinuteur) clearTimeout(recogMinuteur);
+      recogMinuteur = setTimeout(() => { try { r.stop(); } catch (err) {} }, PAUSE_FIN_DICTEE_MS);
       setTranscript((recogTranscript + interim).trim());
     };
 
@@ -683,8 +688,9 @@ function useMic(onResult) {
     // Fin de l'écoute (pause, toucher du micro ou erreur) : on transmet ce qui a été dit.
     r.onend = () => {
       if (recog !== r) return;
+      if (recogMinuteur) { clearTimeout(recogMinuteur); recogMinuteur = null; }
       recog = null;
-      const text = (recogTranscript + recogInterim).trim();
+      const text = (recogTranscript + recogInterim).replace(/\s+/g, ' ').trim();
       recogTranscript = ''; recogInterim = '';
       setMic('off'); setTranscript('');
       if (text) onResultRef.current(text, true);
