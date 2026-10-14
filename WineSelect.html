@@ -13,6 +13,20 @@
 <script>window.Babel || document.write('<script src="https://unpkg.com/@babel/standalone@7.29.10/babel.min.js"><\/script>');</script>
 <link href="vendor/polices.css" rel="stylesheet">
 <style>*{box-sizing:border-box;margin:0;padding:0}body{background:#faf6ee}</style>
+<script>
+// Grand écran (tablette, borne) : l'écran, pensé pour la largeur d'un téléphone,
+// est agrandi d'un seul bloc (x1 à x1,5) pour occuper la place disponible.
+// --ecran = hauteur visible, à utiliser à la place de 100vh (que l'agrandissement fausse).
+(function () {
+  function ajuster() {
+    var z = Math.max(1, Math.min(1.5, window.innerWidth / 720, window.innerHeight / 700));
+    document.documentElement.style.zoom = z;
+    document.documentElement.style.setProperty('--ecran', (window.innerHeight / z) + 'px');
+  }
+  ajuster();
+  window.addEventListener('resize', ajuster);
+})();
+</script>
 </head>
 <body>
 
@@ -958,7 +972,7 @@ function WineModal({wine, onClose, onCollect}) {
     .concat(wine.accord ? [['Pour votre recherche', wine.accord]] : []);
   return (
     <div style={{position:'fixed', inset:0, background:'rgba(42,18,21,.45)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:300, padding:16, backdropFilter:'blur(3px)'}} onClick={onClose}>
-      <div style={{...sans, background:I.cream, borderRadius:24, border:'1px solid ' + I.bord, padding:'30px 28px 26px', maxWidth:440, width:'100%', maxHeight:'88vh', overflowY:'auto', boxShadow:'0 30px 70px rgba(42,18,21,.22)'}} onClick={e=>e.stopPropagation()}>
+      <div style={{...sans, background:I.cream, borderRadius:24, border:'1px solid ' + I.bord, padding:'30px 28px 26px', maxWidth:440, width:'100%', maxHeight:'calc(var(--ecran, 100vh) * .88)', overflowY:'auto', boxShadow:'0 30px 70px rgba(42,18,21,.22)'}} onClick={e=>e.stopPropagation()}>
         <div style={{textAlign:'center'}}>
           <div style={{display:'flex', justifyContent:'center', marginBottom:14}}><PhotoVin wine={wine} h={wine.photo ? 180 : 140}/></div>
           {wine.accord && <div style={capsIv(10, I.gold, {letterSpacing:'.2em', fontWeight:600, marginBottom:8})}>{wine.accord}</div>}
@@ -1008,19 +1022,17 @@ function Home({setView, collector, customerApi}) {
   ];
 
   return (
-    <div style={{minHeight:'100vh', background:C.bg, color:C.ink, display:'flex', flexDirection:'column', paddingBottom:96}}>
-      {/* Barre haute : carte client (masquée pour l'instant) */}
-      <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', padding:'22px 24px 0', minHeight:66}}>
-        {FONCTIONS_CLIENT.carteFidelite && (
-          <button onClick={()=>setView('login')} style={boutonHaut} onMouseEnter={e=>survol(e,true)} onMouseLeave={e=>survol(e,false)}>
-            {client ? <IconeClient/> : <IconeCarte/>}
-            <span>{client ? client.name : 'Carte client'}</span>
-          </button>
-        )}
-      </div>
+    <div style={{minHeight:'var(--ecran, 100vh)', background:C.bg, color:C.ink, display:'flex', flexDirection:'column', paddingBottom:40}}>
+      {/* Barre haute : carte client (masquée pour l'instant, la barre aussi pour gagner de la hauteur) */}
+      {FONCTIONS_CLIENT.carteFidelite && <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', padding:'22px 24px 0', minHeight:66}}>
+        <button onClick={()=>setView('login')} style={boutonHaut} onMouseEnter={e=>survol(e,true)} onMouseLeave={e=>survol(e,false)}>
+          {client ? <IconeClient/> : <IconeCarte/>}
+          <span>{client ? client.name : 'Carte client'}</span>
+        </button>
+      </div>}
 
       {/* Signature */}
-      <div style={{textAlign:'center', padding:'clamp(48px,10vh,96px) 24px 0'}}>
+      <div style={{textAlign:'center', padding:'clamp(32px, calc(var(--ecran, 100vh) * .07), 96px) 24px 0'}}>
         <div style={capsIv(11, C.gold, {letterSpacing:'.34em', fontWeight:600, marginBottom:14})}>Cave &amp; Sélection</div>
         {/* Appui long (3 s) sur le logo : écran de dépannage, pour l'installateur. */}
         <h1 {...appuiLong(() => setView('depannage'))} style={{...serif, margin:0, fontSize:'clamp(3.4rem,11vw,5rem)', fontWeight:500, lineHeight:.95, letterSpacing:'-.02em', color:C.wine, userSelect:'none', WebkitUserSelect:'none', WebkitTouchCallout:'none'}}>WineSelect</h1>
@@ -1033,7 +1045,7 @@ function Home({setView, collector, customerApi}) {
       </div>
 
       {/* Action principale */}
-      <div style={{width:'100%', maxWidth:560, margin:'0 auto', padding:'clamp(36px,7vh,64px) 24px 0'}}>
+      <div style={{width:'100%', maxWidth:560, margin:'0 auto', padding:'clamp(28px, calc(var(--ecran, 100vh) * .05), 64px) 24px 0'}}>
         <button onClick={()=>setView('selection')}
           style={{width:'100%', textAlign:'left', display:'flex', alignItems:'center', gap:20, padding:'30px 28px', background:C.wine, border:'none', borderRadius:20, cursor:'pointer', boxShadow:'0 22px 48px rgba(94,22,34,.18)', fontFamily:'Montserrat,sans-serif', transition:'transform .4s ease'}}
           onMouseEnter={e=>{e.currentTarget.style.transform='translateY(-2px)';}} onMouseLeave={e=>{e.currentTarget.style.transform='translateY(0)';}}>
@@ -1330,7 +1342,7 @@ function Selection({setView, setResults}) {
   const platsOpts = PAIRINGS.filter(p => p.id !== 'apéritif');
 
   return (
-    <div style={{minHeight:'100vh', background:C.bg, color:C.ink, paddingBottom:96}}>
+    <div style={{minHeight:'var(--ecran, 100vh)', background:C.bg, color:C.ink, paddingBottom:96}}>
       <EnteteIvoire onBack={screen === 'thinking' ? null : back}
         droite={screen !== 'thinking' && (couleur || budget) ? <span style={capsIv(10, C.muted, {letterSpacing:'.14em'})}>{count + ' vins'}</span> : null}/>
       <div style={{padding:'18px 24px 0', maxWidth:560, margin:'0 auto'}}>
@@ -1537,7 +1549,7 @@ function Results({results, setView, collector}) {
   );
 
   if (!results.length) return (
-    <div style={{minHeight:'100vh', background:IV.bg, color:IV.ink}}>
+    <div style={{minHeight:'var(--ecran, 100vh)', background:IV.bg, color:IV.ink}}>
       <div style={{textAlign:'center', padding:'90px 28px'}}>
         <h2 style={{...serif, fontSize:34, fontWeight:500, color:IV.ink, margin:'0 0 10px'}}>Aucun vin ne correspond</h2>
         <p style={{fontSize:14, color:IV.muted, marginBottom:26}}>Essayez un autre budget, ou décrivez votre plat au sommelier.</p>
@@ -1556,7 +1568,7 @@ function Results({results, setView, collector}) {
   const nb = results.length;
 
   return (
-    <div style={{minHeight:'100vh', background:IV.bg, color:IV.ink, paddingBottom:96}}>
+    <div style={{minHeight:'var(--ecran, 100vh)', background:IV.bg, color:IV.ink, paddingBottom:96}}>
       {/* En-tête */}
       <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', padding:'22px 24px 18px', borderBottom:'1px solid '+IV.line}}>
         <button onClick={()=>setView('selection')} style={{...sans, display:'flex', alignItems:'center', gap:8, minHeight:46, padding:'0 18px 0 12px', background:'transparent', border:'1px solid '+IV.line2, borderRadius:999, color:IV.ink, fontSize:13, letterSpacing:'.04em', cursor:'pointer'}}>
@@ -1662,7 +1674,7 @@ function Mystery({setView, collector}) {
     </div>
   );
   return (
-    <div style={{minHeight:'100vh', background:I.bg, color:I.ink}}>
+    <div style={{minHeight:'var(--ecran, 100vh)', background:I.bg, color:I.ink}}>
       <Header title="Choix mystère" onBack={()=>setView('home')}/>
       <div style={{...sans, textAlign:'center', padding:'clamp(40px,8vh,72px) 24px 120px', maxWidth:520, margin:'0 auto'}}>
         {!wine ? (
@@ -1755,7 +1767,7 @@ function Chat({setView, collector, customer}) {
   const peutEnvoyer = !!input.trim() && !loading;
 
   return (
-    <div style={{display:'flex', flexDirection:'column', height:'calc(100vh - 34px)', background:I.bg, color:I.ink}}>
+    <div style={{display:'flex', flexDirection:'column', height:'calc(var(--ecran, 100vh) - 34px)', background:I.bg, color:I.ink}}>
       <style>{'@keyframes pulseIv{0%,100%{box-shadow:0 0 0 0 rgba(94,22,34,.35)}50%{box-shadow:0 0 0 10px rgba(94,22,34,0)}}@keyframes pointIv{0%,80%,100%{opacity:.25}40%{opacity:1}}'}</style>
       <EnteteIvoire onBack={()=>setView('home')}/>
 
@@ -1865,7 +1877,7 @@ function AgeGate({onConfirm}) {
   const sans = {fontFamily:'Montserrat,sans-serif'};
   const [refused, setRefused] = useState(false);
   return (
-    <div style={{...sans, minHeight:'100vh', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:'24px 24px 80px', background:I.bg, color:I.ink, textAlign:'center'}}>
+    <div style={{...sans, minHeight:'var(--ecran, 100vh)', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:'24px 24px 80px', background:I.bg, color:I.ink, textAlign:'center'}}>
       <div style={capsIv(11, I.gold, {letterSpacing:'.34em', fontWeight:600, marginBottom:14})}>Cave &amp; Sélection</div>
       <div style={{...serif, fontSize:'clamp(3rem,10vw,4.4rem)', fontWeight:500, color:I.wine, lineHeight:.95, letterSpacing:'-.02em'}}>WineSelect</div>
       <div style={{display:'flex', alignItems:'center', justifyContent:'center', gap:12, margin:'22px auto 40px'}}>
@@ -1934,7 +1946,7 @@ function LoginScreen({setView, customerApi}) {
   const Rond = ({children}) => <div style={{width:72, height:72, margin:'0 auto 18px', borderRadius:'50%', border:'1px solid ' + I.bord2, display:'flex', alignItems:'center', justifyContent:'center', color:I.wine}}>{children}</div>;
 
   return (
-    <div style={{...sans, minHeight:'100vh', background:I.bg, color:I.ink}}>
+    <div style={{...sans, minHeight:'var(--ecran, 100vh)', background:I.bg, color:I.ink}}>
       <Header title="Carte client" subtitle="Programme fidélité du magasin" onBack={()=>setView('home')}/>
       <div style={{maxWidth:480, margin:'0 auto', padding:'36px 20px 120px', textAlign:'center'}}>
         {welcome ? (
@@ -1996,7 +2008,7 @@ function CollectorPage({setView, collector, customer}) {
   const nbNotes = ownedWines.filter(w=>collector.ratings[w.id]).length;
 
   return (
-    <div style={{...sans, minHeight:'100vh', background:I.bg, color:I.ink}}>
+    <div style={{...sans, minHeight:'var(--ecran, 100vh)', background:I.bg, color:I.ink}}>
       <Header title="Ma cave" subtitle={collector.totalCards + ' vin' + (collector.totalCards>1?'s':'') + (collector.points ? ' · ' + collector.points + ' points' : '')} onBack={()=>setView('home')}
         right={collector.discount>0 ? <div style={{...capsIv(11, I.wine, {letterSpacing:'.1em', fontWeight:600}), border:'1px solid ' + I.wine, borderRadius:999, padding:'10px 14px'}}>{'−' + collector.discount + ' %'}</div> : null}/>
       <div style={{maxWidth:620, margin:'0 auto', padding:'26px 20px 120px'}}>
@@ -2128,7 +2140,7 @@ function Depannage({setView}) {
   const dateHeure = iso => iso ? new Date(iso).toLocaleString('fr-FR', {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'}) : 'jamais';
 
   return (
-    <div style={{minHeight:'100vh', background:I.bg, color:I.ink, ...sans}}>
+    <div style={{minHeight:'var(--ecran, 100vh)', background:I.bg, color:I.ink, ...sans}}>
       <EnteteIvoire onBack={() => setView('home')}/>
       <div style={{maxWidth:560, margin:'0 auto', padding:'28px 24px 120px'}}>
         <div style={capsIv(11, I.gold, {fontWeight:600, marginBottom:8})}>Réservé à l'installation</div>
