@@ -227,13 +227,22 @@ function detectPairing(messages) {
   return null;
 }
 
+// Vins proposables : on écarte ceux dont le stock est à 0 (ou négatif). Un vin
+// sans stock renseigné reste proposable. Si le rayon en stock compte moins de
+// 3 vins, on garde tout le catalogue : le sommelier propose toujours 3 vins.
+function vinsEnStock(catalogue) {
+  const tous = catalogue || [];
+  const dispo = tous.filter(w => typeof w.stock !== 'number' || w.stock > 0);
+  return dispo.length >= 3 ? dispo : tous;
+}
+
 // ── Chat libre avec le sommelier (route /sommelier) ──────────────────────────
 // body = { messages, system, featuredIds } envoyé par l'écran.
 // Renvoie { status, body } : c'est au serveur (borne ou central) de répondre.
 async function repondreSommelier(body, env) {
   // env.callApi permet de remplacer l'appel à Mistral (ex. borne hors connexion : appel impossible → replis).
   const callApi = env.callApi || appelHttps;
-  const WINES_CATALOG = env.catalogue || [], CONFIG = env.config;
+  const WINES_CATALOG = vinsEnStock(env.catalogue), CONFIG = env.config;
   const { messages, system, featuredIds } = body;
   const featuredSet = new Set(Array.isArray(featuredIds) ? featuredIds : []);
   const featuredBonus = w => featuredSet.has(w.id) ? 3 : 0; // même logique de départage que /selection-accord
@@ -481,7 +490,7 @@ const BUDGET_BRACKETS = {
 // Couleurs conseillées pour un plat de la liste (écran « Avez-vous une préférence ? »).
 // Calcul local par le moteur d'accords, sans appel à l'API.
 function couleursConseillees(body, env) {
-  const WINES_CATALOG = env.catalogue || [];
+  const WINES_CATALOG = vinsEnStock(env.catalogue);
   const bracket = BUDGET_BRACKETS[body.budget];
   if (!ACCORDS || !WINES_CATALOG.length || !bracket) return { couleurs: null };
   const plat = ACCORDS.platDepuisCategorie(body.pairing, body.detail);
@@ -508,7 +517,7 @@ function profilsVins(env) {
 // Sélection guidée (route /selection-accord). Renvoie { status, body }.
 async function selectionAccord(body, env) {
   const callApi = env.callApi || appelHttps;
-  const WINES_CATALOG = env.catalogue || [], CONFIG = env.config;
+  const WINES_CATALOG = vinsEnStock(env.catalogue), CONFIG = env.config;
   const { type, budget, pairing, detail, featuredIds } = body;
   const featuredSet = new Set(Array.isArray(featuredIds) ? featuredIds : []);
 
@@ -731,6 +740,7 @@ function appelHttps({ hostname, path, headers, payload }, tentative = 1) {
 module.exports = {
   libelleVin,
   avecLibelles,
+  vinsEnStock,
   repondreSommelier,
   selectionAccord,
   couleursConseillees,

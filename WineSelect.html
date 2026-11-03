@@ -496,8 +496,15 @@ function noteGoutLocale(w, gout) {
   return s;
 }
 
+// Vins proposables : stock à 0 écarté (stock non renseigné = proposable). Moins de 3
+// vins en stock : on garde tout le rayon, pour toujours proposer 3 vins.
+function vinsEnStock() {
+  const dispo = WINES.filter(w => typeof w.stock !== 'number' || w.stock > 0);
+  return dispo.length >= 3 ? dispo : WINES;
+}
+
 function filterWines(type, budget, pairing) {
-  let results = WINES.filter(w =>
+  let results = vinsEnStock().filter(w =>
     (!type    || w.type === type) &&
     (!budget  || w.budget === budget) &&
     (!pairing || (w.pairings||[]).includes(pairing))
@@ -814,9 +821,10 @@ function localFallback(msg) {
   const premiumIntent = /peu importe le prix|grande occasion|grand cru|prestige|meilleur vin|sans limite/.test(m);
   if (maxP === null && !premiumIntent) { maxP = 45; minP = 0; }
 
-  let pool = WINES.filter(w => (maxP===null || w.price<=maxP) && w.price>=minP);
-  if (!pool.length) pool = [...WINES].filter(w => maxP===null || w.price <= maxP*1.05); // jamais au-dessus du budget
-  if (!pool.length) pool = [...WINES];
+  const dispo = vinsEnStock();
+  let pool = dispo.filter(w => (maxP===null || w.price<=maxP) && w.price>=minP);
+  if (!pool.length) pool = dispo.filter(w => maxP===null || w.price <= maxP*1.05); // jamais au-dessus du budget
+  if (!pool.length) pool = [...dispo];
 
   if (/\brosé\b/.test(m)) pool=pool.filter(w=>w.type==='rosé');
   else if (/champagne|bulle|crémant/.test(m)) pool=pool.filter(w=>w.type==='bulles');
@@ -1694,7 +1702,7 @@ function Mystery({setView, collector}) {
   const [wine,  setWine]  = useState(null);
   const [added, setAdded] = useState(false);
   const reveal = () => {
-    const pool = WINES.filter(w=>w.price>=8&&w.price<=30);
+    const pool = vinsEnStock().filter(w=>w.price>=8&&w.price<=30);
     setWine(pool[Math.floor(Math.random()*pool.length)]);
     setAdded(false);
   };
