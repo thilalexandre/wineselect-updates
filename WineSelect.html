@@ -258,6 +258,9 @@ const DEFAULT_FEATURED_LABEL = "Sélection du magasin";
 // Carte fidélité, comptes clients, « Ma cave » et notes en étoiles : supprimés
 // définitivement (novembre 2026). La borne ne garde rien sur ses clients ; l'avis
 // se donne d'un geste, anonyme (QuestionAvis, pouce levé ou baissé).
+// Au chargement : effacement de ce que les anciens comptes avaient laissé dans le
+// navigateur de la borne (profils, cave, notes, client en cours).
+try { ['ws_profiles', 'ws_global_ratings', 'ws_col', 'ws_current_customer'].forEach(k => localStorage.removeItem(k)); } catch (e) {}
 
 const TYPES=[
   {id:'rouge',  label:'Rouge',  desc:'Tanins et caractère',     color:'#6B2635', bg:'#fbeaec'},

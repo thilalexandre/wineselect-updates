@@ -244,10 +244,22 @@ setInterval(() => {
 // ── Persistance serveur (data/*.json) ───────────────────────────────────────
 // Données de la borne en mode autonome (stocks importés, stratégie, prix d'achat,
 // réponses de satisfaction et mesures d'usage). Aucune donnée sur les clients.
-const DATA_DIR = path.join(__dirname, 'data');
+// (WINESELECT_DONNEES : autre dossier, pour les tests.)
+const DATA_DIR = path.resolve(process.env.WINESELECT_DONNEES || path.join(__dirname, 'data'));
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 
 function dataFile(name) { return path.join(DATA_DIR, name + '.json'); }
+
+// Comptes clients supprimés (novembre 2026) : les anciens profils (numéros de
+// carte, cave) et notes des clients encore présents sur la borne sont effacés
+// au démarrage. Rien ne les recrée.
+for (const nom of ['profiles', 'global-ratings']) {
+  for (const fichier of [dataFile(nom), dataFile(nom) + '.tmp']) {
+    try {
+      if (fs.existsSync(fichier)) { fs.unlinkSync(fichier); console.log('🧹 Ancien fichier client effacé : data/' + path.basename(fichier)); }
+    } catch (e) { console.warn('⚠️  ' + path.basename(fichier) + ' non effacé :', e.message); }
+  }
+}
 
 function readJSON(name, fallback) {
   try {
