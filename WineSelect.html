@@ -255,9 +255,9 @@ const DEFAULT_FEATURED_LABEL = "Sélection du magasin";
 // gestion en ligne : plus aucun accès gérant depuis cet écran (octobre 2026).
 // Seul reste l'écran de dépannage (appui long sur le logo, puis le code).
 
-// Fonctions client masquées en attendant les comptes clients WineSelect (chantier
-// suivant) : le code reste en place, passer à true pour les réafficher.
-const FONCTIONS_CLIENT = { carteFidelite: false, maCave: false };
+// Carte fidélité, comptes clients, « Ma cave » et notes en étoiles : supprimés
+// définitivement (novembre 2026). La borne ne garde rien sur ses clients ; l'avis
+// se donne d'un geste, anonyme (QuestionAvis, pouce levé ou baissé).
 
 const TYPES=[
   {id:'rouge',  label:'Rouge',  desc:'Tanins et caractère',     color:'#6B2635', bg:'#fbeaec'},
@@ -542,93 +542,6 @@ function filterWines(type, budget, pairing) {
 }
 
 // ── PROFILS CLIENTS (carte pass magasin) ──────────────────────────────────────
-// Sauvegarde de secours vers le serveur : best-effort, jamais bloquant.
-// Si le serveur ne répond pas (borne hors ligne, etc.), l'app continue de
-// fonctionner normalement avec localStorage — c'est juste la copie de
-// sûreté qui manquera pour cette sauvegarde.
-function syncToServer(endpoint, data){
-  try{
-    fetch('/api/' + endpoint, {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify(data),
-    }).catch(()=>{});
-  }catch(e){}
-}
-
-function loadProfiles(){ try{ return JSON.parse(localStorage.getItem('ws_profiles')||'{}'); }catch(e){ return {}; } }
-function saveProfiles(p){ try{ localStorage.setItem('ws_profiles', JSON.stringify(p)); }catch(e){} syncToServer('profiles', p); }
-function loadGlobalRatings(){ try{ return JSON.parse(localStorage.getItem('ws_global_ratings')||'{}'); }catch(e){ return {}; } }
-function saveGlobalRatings(r){ try{ localStorage.setItem('ws_global_ratings', JSON.stringify(r)); }catch(e){} syncToServer('global-ratings', r); }
-
-function useCustomer(){
-  const [customer, setCustomer] = useState(()=>{
-    try{ const id=localStorage.getItem('ws_current_customer'); if(!id) return null; return loadProfiles()[id]||null; }catch(e){ return null; }
-  });
-  const login = useCallback((cardId)=>{
-    const id=(cardId||'').trim(); if(!id) return null;
-    const profiles=loadProfiles();
-    let prof=profiles[id];
-    const isNew=!prof;
-    if(!prof){ prof={id:id, name:'Client '+id.slice(-4).toUpperCase(), collection:{}, ratings:{}, createdAt:Date.now()}; }
-    prof.lastVisit=Date.now();
-    profiles[id]=prof; saveProfiles(profiles);
-    try{ localStorage.setItem('ws_current_customer', id); }catch(e){}
-    setCustomer({...prof});
-    return {profile:prof, isNew:isNew};
-  },[]);
-  const logout = useCallback(()=>{ try{ localStorage.removeItem('ws_current_customer'); }catch(e){} setCustomer(null); },[]);
-  // RGPD : droit à l'effacement — supprime intégralement le profil de la borne
-  const erase = useCallback(()=>{
-    setCustomer(prev=>{ if(prev){ const p=loadProfiles(); delete p[prev.id]; saveProfiles(p); } return null; });
-    try{ localStorage.removeItem('ws_current_customer'); }catch(e){}
-  },[]);
-  const update = useCallback((fn)=>{
-    setCustomer(prev=>{
-      if(!prev) return prev;
-      const next=fn({...prev});
-      const profiles=loadProfiles(); profiles[next.id]=next; saveProfiles(profiles);
-      return next;
-    });
-  },[]);
-  return {customer:customer, login:login, logout:logout, update:update, erase:erase};
-}
-
-// ── COLLECTOR ─────────────────────────────────────────────────────────────────
-function useCollector(customerApi) {
-  const customer = customerApi ? customerApi.customer : null;
-  const [anonCol, setAnonCol] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('ws_col') || '{}'); } catch { return {}; }
-  });
-  const collection = customer ? (customer.collection||{}) : anonCol;
-  const addWine = useCallback((wineId) => {
-    if (customer && customerApi) {
-      customerApi.update(p=>({...p, collection:{...(p.collection||{}), [wineId]:((p.collection||{})[wineId]||0)+1}}));
-    } else {
-      setAnonCol(prev => {
-        const next = {...prev, [wineId]: (prev[wineId]||0)+1};
-        try{ localStorage.setItem('ws_col', JSON.stringify(next)); }catch(e){}
-        return next;
-      });
-    }
-  }, [customer, customerApi]);
-  // Notation d'un vin par le client (1 à 5 étoiles) + agrégat global pour l'admin
-  const rateWine = useCallback((wineId, stars) => {
-    if (!customerApi || !customer) return;
-    const prevStars = (customer.ratings||{})[wineId] || 0;
-    customerApi.update(p=>({...p, ratings:{...(p.ratings||{}), [wineId]:stars}}));
-    const g = loadGlobalRatings();
-    const e = g[wineId] || {sum:0, count:0};
-    if (prevStars>0) { e.sum = e.sum - prevStars + stars; }
-    else { e.sum += stars; e.count += 1; }
-    g[wineId] = e; saveGlobalRatings(g);
-  }, [customer, customerApi]);
-  const ratings = customer ? (customer.ratings||{}) : {};
-  const totalCards = Object.keys(collection).length;
-  const points = totalCards * 10;
-  return {collection, addWine, totalCards, points, rateWine, ratings, customer};
-}
-
 // ── VOICE ─────────────────────────────────────────────────────────────────────
 // Dictée en un seul toucher : le client parle, l'écoute s'arrête d'elle-même après
 // PAUSE_FIN_DICTEE_MS de silence (une hésitation ne coupe pas la phrase), et la
@@ -862,7 +775,7 @@ function GoldLine() {
 }
 
 // ── WINE COLLECTOR CARD ───────────────────────────────────────────────────────
-function WineCard({wine, owned=0, onCollect, compact=false, onClick}) {
+function WineCard({wine, compact=false, onClick}) {
   const [flipped, setFlipped] = useState(false);
   const rarity  = CARTE_STYLE;
   const typeInfo = TYPES.find(t=>t.id===wine.type) || TYPES[0];
@@ -923,7 +836,6 @@ function WineCard({wine, owned=0, onCollect, compact=false, onClick}) {
             <span style={{...serif, fontSize:compact?17:21, fontWeight:700, color:C.wine, lineHeight:1}}>{wine.price + ' €'}</span>
             <div style={{textAlign:'right'}}>
               {wine.accord && <div style={{fontSize:compact?8:9, color:C.gold2, fontWeight:600, letterSpacing:'.02em'}}>{wine.accord}</div>}
-              {owned>0 && <div style={{fontSize:8, color:C.wine, fontWeight:700, marginTop:1}}>dans ma cave ×{owned}</div>}
             </div>
           </div>
         </div>
@@ -983,19 +895,10 @@ function WineCard({wine, owned=0, onCollect, compact=false, onClick}) {
           {/* Pied : prix + accord + action */}
           <div style={{marginTop:'auto', padding:compact?'6px 9px 8px':'8px 12px 10px'}}>
             <div style={{height:1, background:`linear-gradient(90deg,transparent,${rarity.dot},transparent)`, marginBottom:compact?5:7, opacity:.85}}/>
-            <div style={{display:'flex', justifyContent:'space-between', alignItems:'flex-end', marginBottom:onCollect?(compact?5:7):0}}>
+            <div style={{display:'flex', justifyContent:'space-between', alignItems:'flex-end', marginBottom:0}}>
               <span style={{...serif, fontSize:compact?15:19, fontWeight:700, color:'#fdf8f0', lineHeight:1}}>{wine.price}€</span>
               {wine.accord && <div style={{fontSize:compact?8:9, color:rarity.dot, fontWeight:700}}>{wine.accord}</div>}
             </div>
-            {onCollect && (
-              <button onClick={e=>{e.stopPropagation();onCollect(wine);}} style={{
-                background:'#faf6ee',
-                border:'none', borderRadius:50,
-                padding:compact?'6px 8px':'9px 10px',
-                fontSize:compact?9:10.5, fontWeight:600, color:'#5e1622',
-                cursor:'pointer', width:'100%',
-              }}>Garder dans ma cave</button>
-            )}
           </div>
         </div>
       </div>
@@ -1004,7 +907,7 @@ function WineCard({wine, owned=0, onCollect, compact=false, onClick}) {
 }
 
 // ── MODAL ─────────────────────────────────────────────────────────────────────
-function WineModal({wine, onClose, onCollect}) {
+function WineModal({wine, onClose}) {
   if (!wine) return null;
   const I = C_IVOIRE;
   const sans = {fontFamily:'Montserrat,sans-serif'};
@@ -1036,7 +939,6 @@ function WineModal({wine, onClose, onCollect}) {
           </>
         )}
         <div style={{display:'flex', gap:10, marginTop:24}}>
-          {onCollect && <button onClick={onCollect} style={{...sans, flex:1, minHeight:52, background:I.wine, color:I.bg, border:'none', borderRadius:999, cursor:'pointer', fontSize:14, fontWeight:500}}>Garder dans ma cave</button>}
           <button onClick={onClose} style={{...sans, flex:1, minHeight:52, background:'transparent', color:I.wine, border:'1px solid ' + I.bord2, borderRadius:999, cursor:'pointer', fontSize:14}}>Fermer</button>
         </div>
       </div>
@@ -1045,15 +947,11 @@ function WineModal({wine, onClose, onCollect}) {
 }
 
 // ── HOME ──────────────────────────────────────────────────────────────────────
-function Home({setView, collector, customerApi}) {
+function Home({setView}) {
   // Accueil en direction « Ivoire épuré » : signature typographique (plus de
   // bouteille dessinée en guise de logo), une action principale, deux secondaires.
   const C = C_IVOIRE;
-  const client = customerApi && customerApi.customer;
-  const boutonHaut = {display:'flex', alignItems:'center', gap:8, minHeight:44, padding:'0 16px', background:'transparent', border:'1px solid ' + C.bord, borderRadius:999, color:C.body, cursor:'pointer', fontFamily:'Montserrat,sans-serif', ...capsIv(11, C.body, {letterSpacing:'.14em', fontWeight:500}), transition:'border-color .3s'};
   const survol = (e, on) => { e.currentTarget.style.borderColor = on ? C.wine : C.bord; };
-  const IconeCarte = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M3 10h18M7 15h4"/></svg>;
-  const IconeClient = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="8.5" r="3.5"/><path d="M5 20c1.2-3.6 4-5.5 7-5.5s5.8 1.9 7 5.5"/></svg>;
   const secondaires = [
     {v:'chat', label:'Parler au sommelier', sub:'Décrivez votre plat, posez votre question',
      icone: <svg width="28" height="28" viewBox="0 0 32 32" fill="none" stroke={C.wine} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 8.5C5 6.6 6.6 5 8.5 5h15C25.4 5 27 6.6 27 8.5v10c0 1.9-1.6 3.5-3.5 3.5H14l-6 5v-5h0.5C6.6 22 5 20.4 5 18.5z"/><path d="M11 12h10M11 16h6"/></svg>},
@@ -1063,14 +961,6 @@ function Home({setView, collector, customerApi}) {
 
   return (
     <div style={{minHeight:'var(--ecran, 100vh)', background:C.bg, color:C.ink, display:'flex', flexDirection:'column', paddingBottom:40}}>
-      {/* Barre haute : carte client (masquée pour l'instant, la barre aussi pour gagner de la hauteur) */}
-      {FONCTIONS_CLIENT.carteFidelite && <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', padding:'22px 24px 0', minHeight:66}}>
-        <button onClick={()=>setView('login')} style={boutonHaut} onMouseEnter={e=>survol(e,true)} onMouseLeave={e=>survol(e,false)}>
-          {client ? <IconeClient/> : <IconeCarte/>}
-          <span>{client ? client.name : 'Carte client'}</span>
-        </button>
-      </div>}
-
       {/* Signature */}
       <div style={{textAlign:'center', padding:'clamp(32px, calc(var(--ecran, 100vh) * .07), 96px) 24px 0'}}>
         <div style={capsIv(11, C.gold, {letterSpacing:'.34em', fontWeight:600, marginBottom:14})}>Cave &amp; Sélection</div>
@@ -1114,19 +1004,6 @@ function Home({setView, collector, customerApi}) {
           ))}
         </div>
 
-        {/* Ma collection (masquée pour l'instant) */}
-        {FONCTIONS_CLIENT.maCave && <div style={{display:'flex', alignItems:'center', justifyContent:'center', gap:14, marginTop:30, flexWrap:'wrap'}}>
-          <button onClick={()=>setView('collector')}
-            style={{minHeight:44, padding:'0 18px', background:'transparent', border:'none', cursor:'pointer', fontFamily:'Montserrat,sans-serif', ...capsIv(11, C.wine, {letterSpacing:'.18em', fontWeight:600}), textDecoration:'underline', textUnderlineOffset:6, textDecorationColor:C.bord2}}>
-            Ma collection
-          </button>
-          {collector.totalCards>0 && (
-            <span style={{fontSize:13, color:C.muted}}>
-              {collector.totalCards + ' vin' + (collector.totalCards>1?'s':'') + ' en cave'}
-              {collector.discount>0 ? ' · −' + collector.discount + ' %' : ''}
-            </span>
-          )}
-        </div>}
       </div>
     </div>
   );
@@ -1231,6 +1108,9 @@ function Selection({setView, setResults}) {
   const [conseils, setConseils] = useState(null);   // repas : couleurs conseillées pour le plat
   const {mic, toggle, transcript, erreur: erreurMicro} = useMic(t => setTexte(prev => (prev ? prev + ' ' : '') + t));
 
+  // Mesure : chaque étape atteinte (la dernière d'une session sans résultat = l'abandon)
+  useEffect(() => { if (screen !== 'thinking') noterUsage('etape', {etape: screen}); }, [screen]);
+
   const go = s => { setHist(h => h.concat([screen])); setScreen(s); };
   const back = () => {
     if (screen === 'thinking') return;
@@ -1330,6 +1210,13 @@ function Selection({setView, setResults}) {
     }, over || {});
     setHist(h => h.concat([screen]));
     setScreen('thinking');
+    // Chaque sélection affichée reçoit sa propre clé : la question de satisfaction
+    // n'y est posée qu'une fois.
+    const afficher = r => {
+      r.avis = {cle: 'g' + Date.now() + '-' + Math.random().toString(36).slice(2, 8), occasion: o.occasion, budget: o.budget};
+      if (r.length) noterUsage('resultats', {mode:'guide', occasion: o.occasion, budget: o.budget, vins: r.map(w => w.id)});
+      setResults(r); setView('results');
+    };
     fetch('http://localhost:3000/selection-accord', {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify(Object.assign({}, o, {featuredIds: WINES.filter(w => w.featured).map(w => w.id)})),
@@ -1348,9 +1235,9 @@ function Selection({setView, setResults}) {
         else r = withFallbackRoles(r).map(w => ({...w, aiReason:(d.reasons||{})[w.id]}));
         r = r.map(w => ({...w, accord:(d.niveaux||{})[w.id]}));
         r.message = d.message || '';
-        setResults(r); setView('results');
+        afficher(r);
       })
-      .catch(e => { console.warn('Sélection guidée : repli local (' + e.message + ')'); setResults(localFallback(o)); setView('results'); });
+      .catch(e => { console.warn('Sélection guidée : repli local (' + e.message + ')'); afficher(localFallback(o)); });
   };
 
   // ── Éléments d'interface ─────────────────────────────────────────────────
@@ -1564,11 +1451,93 @@ function Selection({setView, setResults}) {
   );
 }
 
+// ── MESURE D'USAGE ANONYME (pilotes, novembre 2026) ──────────────────────────
+// Une session = un passage devant la borne : de la confirmation de l'âge jusqu'à
+// « J'ai terminé » ou à la remise à zéro après 90 s sans toucher l'écran. Son
+// numéro est tiré au hasard, gardé en mémoire seulement le temps du passage, et
+// n'est lié à personne. Sont notés : écrans et étapes du parcours, vins proposés,
+// fiches ouvertes, fin de session. Jamais de texte saisi ni de donnée personnelle.
+// Envoi à la borne (/api/evenements), qui transmet au serveur central (file
+// d'attente sur le disque si Internet est coupé). Ne bloque jamais l'écran.
+const SESSION = {id: null, debut: 0, derniereActivite: 0};
+function idAleatoire() {
+  const t = new Uint8Array(12);
+  crypto.getRandomValues(t);
+  return Array.from(t, b => b.toString(16).padStart(2, '0')).join('');
+}
+function noterUsage(type, donnees) {
+  if (!SESSION.id) return;
+  try {
+    fetch('/api/evenements', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(Object.assign({session: SESSION.id, type: type}, donnees || {})),
+    }).catch(() => {});
+  } catch (e) {}
+}
+function debuterSession() {
+  SESSION.id = idAleatoire();
+  SESSION.debut = SESSION.derniereActivite = Date.now();
+  noterUsage('session');
+}
+function terminerSession(raison) {
+  if (!SESSION.id) return;
+  noterUsage('fin', {raison: raison, duree_s: Math.round((SESSION.derniereActivite - SESSION.debut) / 1000)});
+  SESSION.id = null;   // les écrans affichés ensuite (retour à l'accueil) ne comptent plus
+}
+
+// ── QUESTION DE SATISFACTION (pilotes, novembre 2026) ────────────────────────
+// « Ce conseil vous aide-t-il ? » sous les vins proposés : un seul geste, jamais
+// bloquant. Une seule réponse par sélection affichée (cle), puis « Merci ».
+// Réponse ANONYME envoyée à la borne (/api/satisfaction) : mode, occasion,
+// budget, vins proposés. Rien sur le client.
+const AVIS_DONNES = new Set();
+function IconePouce({bas}) {
+  return (
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={bas ? {transform:'rotate(180deg)'} : null}>
+      <path d="M7 10v11H4.5A1.5 1.5 0 0 1 3 19.5v-8A1.5 1.5 0 0 1 4.5 10H7z"/>
+      <path d="M7 10l4-7.5a2.3 2.3 0 0 1 2.6 2.6L13 9h5.6a2 2 0 0 1 2 2.4l-1.5 7.6a2.5 2.5 0 0 1-2.5 2H7"/>
+    </svg>
+  );
+}
+function QuestionAvis({cle, mode, occasion, budget, vins}) {
+  const I = C_IVOIRE;
+  const sans = {fontFamily:'Montserrat,sans-serif'};
+  const [repondu, setRepondu] = useState(() => AVIS_DONNES.has(cle));
+  if (!cle || !vins || !vins.length) return null;
+  const repondre = utile => {
+    if (repondu || AVIS_DONNES.has(cle)) return;
+    AVIS_DONNES.add(cle);
+    setRepondu(true);
+    fetch('/api/satisfaction', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({utile: utile, mode: mode, occasion: occasion || null, budget: budget || null, vins: vins, session: SESSION.id}),
+    }).catch(() => {});
+  };
+  const bouton = (utile, libelle) => (
+    <button onClick={() => repondre(utile)} aria-label={libelle} title={libelle}
+      style={{width:52, height:52, borderRadius:'50%', border:'1px solid ' + I.bord2, background:'transparent', color:I.wine, display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', flexShrink:0}}>
+      <IconePouce bas={!utile}/>
+    </button>
+  );
+  return (
+    <div style={{...sans, display:'flex', alignItems:'center', justifyContent:'center', gap:14, minHeight:60, marginTop:22, flexWrap:'wrap'}}>
+      {repondu
+        ? <span style={{...serif, fontStyle:'italic', fontSize:20, color:I.muted}}>Merci</span>
+        : <>
+            <span style={{fontSize:14, color:I.body}}>Ce conseil vous aide-t-il ?</span>
+            <div style={{display:'flex', gap:10}}>
+              {bouton(true, "Oui, ce conseil m'aide")}
+              {bouton(false, "Non, ce conseil ne m'aide pas")}
+            </div>
+          </>}
+    </div>
+  );
+}
+
 // ── RESULTS ───────────────────────────────────────────────────────────────────
-function Results({results, setView, collector}) {
+function Results({results, setView}) {
   const [modal, setModal] = useState(null);
-  const [added, setAdded] = useState(null);
-  const handleCollect = wine => { collector.addWine(wine.id); setAdded(wine.id); setTimeout(()=>setAdded(null),2500); };
+  const ouvrir = w => { setModal(w); noterUsage('fiche', {mode:'guide', vin:w.id}); };
   // Le libellé vient du rôle réel du vin (aiRole, assigné par le sommelier ou par
   // l'heuristique de repli) — jamais de sa position dans le tableau. Le
   // DEFAULT_ROLE_ORDER n'est qu'un ultime filet de sécurité.
@@ -1580,14 +1549,6 @@ function Results({results, setView, collector}) {
   const sans = {fontFamily:'Montserrat,sans-serif'};
   const caps = (size, color, extra) => Object.assign({fontSize:size, letterSpacing:'.18em', textTransform:'uppercase', color:color}, extra||{});
   const prix = p => String(p).replace('.', ',') + ' €';
-  const enCave = w => added===w.id || (collector.collection[w.id]||0) > 0;
-
-  const BoutonCave = ({w, small}) => !FONCTIONS_CLIENT.maCave ? null : (
-    <button onClick={e=>{e.stopPropagation(); handleCollect(w);}}
-      style={{...sans, minHeight:small?40:52, padding:small?'0 14px':'0 22px', background:enCave(w)?IV.soft:'transparent', border:'1px solid '+(enCave(w)?IV.line2:IV.wine), borderRadius:999, color:IV.wine, fontSize:small?12:14, fontWeight:500, cursor:'pointer', whiteSpace:'nowrap'}}>
-      {added===w.id ? '✓ Ajouté à ma cave' : enCave(w) ? '✓ Dans ma cave' : 'Garder dans ma cave'}
-    </button>
-  );
 
   if (!results.length) return (
     <div style={{minHeight:'var(--ecran, 100vh)', background:IV.bg, color:IV.ink}}>
@@ -1631,7 +1592,7 @@ function Results({results, setView, collector}) {
         </div>
 
         {/* Vin principal */}
-        <div onClick={()=>setModal(hero)} style={{marginTop:26, display:'flex', gap:24, padding:24, background:IV.surface, border:'1px solid '+IV.line, borderRadius:20, boxShadow:'0 18px 40px rgba(94,22,34,.08)', cursor:'pointer'}}>
+        <div onClick={()=>ouvrir(hero)} style={{marginTop:26, display:'flex', gap:24, padding:24, background:IV.surface, border:'1px solid '+IV.line, borderRadius:20, boxShadow:'0 18px 40px rgba(94,22,34,.08)', cursor:'pointer'}}>
           <div style={{flexShrink:0, width:140, minHeight:280, borderRadius:12, background:IV.soft, display:'flex', alignItems:'center', justifyContent:'center'}}>
             <PhotoVin wine={hero} h={240}/>
           </div>
@@ -1653,7 +1614,6 @@ function Results({results, setView, collector}) {
                 {hero.accord && <span style={caps(10, IV.gold)}>{hero.accord}</span>}
                 <span style={{...serif, fontSize:46, fontWeight:600, lineHeight:.9, color:IV.wine}}>{prix(hero.price)}</span>
               </div>
-              <BoutonCave w={hero}/>
             </div>
           </div>
         </div>
@@ -1662,7 +1622,7 @@ function Results({results, setView, collector}) {
         {autres.length>0 && (
           <div style={{marginTop:16, display:'grid', gridTemplateColumns:autres.length>1?'repeat(2, minmax(0, 1fr))':'1fr', gap:16}}>
             {autres.map(({w,i})=>(
-              <div key={w.id} onClick={()=>setModal(w)} style={{display:'flex', flexDirection:'column', gap:10, padding:20, background:IV.surface, border:'1px solid '+IV.line, borderRadius:16, cursor:'pointer'}}>
+              <div key={w.id} onClick={()=>ouvrir(w)} style={{display:'flex', flexDirection:'column', gap:10, padding:20, background:IV.surface, border:'1px solid '+IV.line, borderRadius:16, cursor:'pointer'}}>
                 <div style={caps(10, IV.gold, {fontWeight:600, letterSpacing:'.2em'})}>{labelFor(w,i)}</div>
                 <div style={{height:150, borderRadius:10, background:IV.soft, display:'flex', alignItems:'center', justifyContent:'center'}}>
                   <PhotoVin wine={w} h={130}/>
@@ -1678,35 +1638,36 @@ function Results({results, setView, collector}) {
                   <span style={{...serif, fontSize:32, fontWeight:600, color:IV.wine}}>{prix(w.price)}</span>
                   {w.accord && <span style={{fontSize:11, color:IV.muted}}>{w.accord}</span>}
                 </div>
-                <BoutonCave w={w} small={true}/>
               </div>
             ))}
           </div>
         )}
 
+        {/* Satisfaction : une réponse par sélection */}
+        {results.avis && <QuestionAvis cle={results.avis.cle} mode="guide" occasion={results.avis.occasion} budget={results.avis.budget} vins={results.map(w => w.id)}/>}
+
         {/* Actions */}
-        <div style={{marginTop:28, display:'flex', gap:12, flexWrap:'wrap'}}>
+        <div style={{marginTop:results.avis ? 12 : 28, display:'flex', gap:12, flexWrap:'wrap'}}>
           <button onClick={()=>setView('home')} style={{...sans, flex:1, minWidth:200, minHeight:58, background:IV.wine, border:'none', borderRadius:999, color:IV.bg, fontSize:15, fontWeight:600, letterSpacing:'.03em', cursor:'pointer'}}>Nouvelle recherche</button>
           <button onClick={()=>setView('chat')} style={{...sans, flex:1, minWidth:200, minHeight:58, background:'transparent', border:'1px solid '+IV.line2, borderRadius:999, color:IV.ink, fontSize:15, cursor:'pointer'}}>Demander au sommelier</button>
         </div>
       </div>
-      {modal && <WineModal wine={modal} onClose={()=>setModal(null)} onCollect={FONCTIONS_CLIENT.maCave ? ()=>{handleCollect(modal);setModal(null);} : null}/>}
+      {modal && <WineModal wine={modal} onClose={()=>setModal(null)}/>}
     </div>
   );
 }
 
 // ── MYSTERY ───────────────────────────────────────────────────────────────────
-function Mystery({setView, collector}) {
+function Mystery({setView}) {
   const I = C_IVOIRE;
   const sans = {fontFamily:'Montserrat,sans-serif'};
   const [wine,  setWine]  = useState(null);
-  const [added, setAdded] = useState(false);
   const reveal = () => {
     const pool = vinsEnStock().filter(w=>w.price>=8&&w.price<=30);
-    setWine(pool[Math.floor(Math.random()*pool.length)]);
-    setAdded(false);
+    const tire = pool[Math.floor(Math.random()*pool.length)];
+    setWine(tire);
+    if (tire) noterUsage('resultats', {mode:'surprise', vins:[tire.id]});
   };
-  const enCave = wine && (added || (collector.collection[wine.id]||0) > 0);
   const Losange = () => (
     <div style={{display:'flex', alignItems:'center', justifyContent:'center', gap:12, margin:'18px auto'}}>
       <span style={{width:48, height:1, background:I.bord2}}/>
@@ -1735,15 +1696,11 @@ function Mystery({setView, collector}) {
             <h2 style={{...serif, fontSize:'clamp(2rem,6vw,2.6rem)', fontWeight:500, color:I.wine, margin:'10px 0 0'}}>Votre vin du moment</h2>
             <Losange/>
             <div style={{display:'flex', justifyContent:'center', marginBottom:20}}>
-              <WineCard wine={wine} owned={collector.collection[wine.id]||0}/>
+              <WineCard wine={wine}/>
             </div>
             <div style={{fontSize:13, color:I.muted, marginBottom:18}}>Touchez la carte pour la retourner</div>
             {wine.emplacement && <div style={{display:'flex', justifyContent:'center', marginBottom:20}}><EmplacementVin wine={wine} grand={true}/></div>}
             <div style={{display:'flex', gap:10, justifyContent:'center', flexWrap:'wrap'}}>
-              {FONCTIONS_CLIENT.maCave && <button onClick={()=>{ if (!enCave) { collector.addWine(wine.id); setAdded(true); } }}
-                style={{...sans, minHeight:52, padding:'0 26px', background:enCave ? I.soft : I.wine, color:enCave ? I.wine : I.bg, border:'1px solid ' + (enCave ? I.bord2 : I.wine), borderRadius:999, fontSize:14, fontWeight:500, cursor:enCave ? 'default' : 'pointer'}}>
-                {added ? '✓ Ajouté à ma cave' : enCave ? '✓ Dans ma cave' : 'Garder dans ma cave'}
-              </button>}
               <button onClick={reveal} style={{...sans, minHeight:52, padding:'0 26px', background:'transparent', color:I.wine, border:'1px solid ' + I.bord2, borderRadius:999, fontSize:14, cursor:'pointer'}}>Une autre suggestion</button>
             </div>
           </div>
@@ -1754,27 +1711,13 @@ function Mystery({setView, collector}) {
 }
 
 // ── CHAT ──────────────────────────────────────────────────────────────────────
-function Chat({setView, collector, customer}) {
-  // RGPD : aucun nom/identifiant client dans les messages (ils sont transmis à l'API IA)
-  const initMsg = {role:'assistant', text:(customer?"Bonjour, ravi de vous revoir.":"Bonjour, je suis le sommelier de votre magasin.")+"\n\nDites-moi ce que vous préparez, votre budget ou vos goûts : je vous propose trois vins de notre rayon.", wines:[]};
-  // Prompt enrichi avec les goûts du client connecté (notes de sa collection)
-  const persoPrompt = useMemo(()=>{
-    if (!customer) return SYS_PROMPT;
-    const r = customer.ratings || {};
-    const liked = Object.entries(r).filter(([,s])=>s>=4).map(([id])=>WINES.find(w=>w.id===parseInt(id))).filter(Boolean);
-    const disliked = Object.entries(r).filter(([,s])=>s<=2).map(([id])=>WINES.find(w=>w.id===parseInt(id))).filter(Boolean);
-    // Pseudonymisé : seules les préférences gustatives sont transmises, jamais l'identité
-    let ctx = "\n\nPROFIL GUSTATIF DU CLIENT (anonyme) :";
-    if (liked.length) ctx += "\nVins notés positivement (4-5 étoiles) : " + liked.map(w=>w.name+" ("+w.type+", "+w.region+", "+(w.grape||'')+")").join(" ; ") + ". Appuie-toi sur ces goûts (cépages, régions, styles) pour orienter tes recommandations et mentionne-le subtilement.";
-    if (disliked.length) ctx += "\nVins peu appréciés (1-2 étoiles) : " + disliked.map(w=>w.name+" ("+w.type+", "+w.region+")").join(" ; ") + ". Évite de proposer ces vins ou des profils très similaires.";
-    if (!liked.length && !disliked.length) ctx += "\nPas encore de notes enregistrées : invite-le subtilement à noter ses vins dans sa collection.";
-    return SYS_PROMPT + ctx;
-  }, [customer]);
+function Chat({setView}) {
+  // RGPD : rien sur le client dans les messages (ils sont transmis à l'API IA)
+  const initMsg = {role:'assistant', text:"Bonjour, je suis le sommelier de votre magasin.\n\nDites-moi ce que vous préparez, votre budget ou vos goûts : je vous propose trois vins de notre rayon.", wines:[]};
   const [msgs,    setMsgs]    = useState([initMsg]);
   const [input,   setInput]   = useState('');
   const [loading, setLoading] = useState(false);
   const [modal,   setModal]   = useState(null);
-  const [added,   setAdded]   = useState(null);
   const bottomRef = useRef(null);
   const {mic, toggle, transcript, erreur: erreurMicro} = useMic((text, isVoice) => send(text, isVoice));
 
@@ -1788,14 +1731,14 @@ function Chat({setView, collector, customer}) {
     setMsgs(newMsgs);
     setLoading(true);
     const history = newMsgs.map(m=>({role:m.role==='assistant'?'assistant':'user',content:m.text}));
-    const resp = await askSommelier(history, persoPrompt);
-    setMsgs(m=>[...m,{role:'assistant',text:resp.text,wines:resp.wines||[]}]);
+    const resp = await askSommelier(history);
+    // avis : clé de la question de satisfaction, propre à cette réponse du sommelier
+    if (resp.wines && resp.wines.length) noterUsage('resultats', {mode:'chat', vins: resp.wines.map(w => w.id)});
+    setMsgs(m=>[...m,{role:'assistant',text:resp.text,wines:resp.wines||[],avis:'c' + Date.now() + '-' + Math.random().toString(36).slice(2, 8)}]);
     setLoading(false);
     // Réponse affichée seulement, jamais lue à voix haute (choix d'Alexandre, octobre 2026) : speak() reste dans useMic si besoin.
   };
 
-  const handleCollect = wine => { collector.addWine(wine.id); setAdded(wine.id); setTimeout(()=>setAdded(null),2500); };
-  const enCave = w => added===w.id || ((collector.collection||{})[w.id]||0) > 0;
   const labels = ['Sélection accessible','Au cœur du budget','Montée en gamme'];
   // Direction « Ivoire épuré » : mêmes fonctions, nouvel habillage.
   const I = C_IVOIRE;
@@ -1830,7 +1773,7 @@ function Chat({setView, collector, customer}) {
                 <div style={{width:'100%', marginTop:12, display:'flex', flexDirection:'column', gap:10}}>
                   {m.wines.map((w,wi)=>(
                     <div key={w.id} style={{background:I.cream, border:'1px solid ' + I.bord, borderRadius:18, overflow:'hidden'}}>
-                      <div onClick={()=>setModal(w)} style={{display:'flex', gap:16, alignItems:'center', padding:'16px 18px', cursor:'pointer'}}>
+                      <div onClick={()=>{ setModal(w); noterUsage('fiche', {mode:'chat', vin:w.id}); }} style={{display:'flex', gap:16, alignItems:'center', padding:'16px 18px', cursor:'pointer'}}>
                         <div style={{width:56, flexShrink:0, display:'flex', justifyContent:'center'}}><PhotoVin wine={w} h={78}/></div>
                         <div style={{flex:1, minWidth:0}}>
                           <div style={capsIv(10, I.gold, {letterSpacing:'.18em', fontWeight:600, marginBottom:5})}>{labels[wi]||''}</div>
@@ -1840,15 +1783,12 @@ function Chat({setView, collector, customer}) {
                         </div>
                         <div style={{...serif, fontSize:26, fontWeight:600, color:I.wine, flexShrink:0}}>{w.price + ' €'}</div>
                       </div>
-                      <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', gap:12, flexWrap:'wrap', padding:'12px 18px', borderTop:'1px solid ' + I.bord, background:I.bg}}>
+                      {w.emplacement && <div style={{display:'flex', alignItems:'center', padding:'12px 18px', borderTop:'1px solid ' + I.bord, background:I.bg}}>
                         <EmplacementVin wine={w}/>
-                        {FONCTIONS_CLIENT.maCave && <button onClick={()=>handleCollect(w)}
-                          style={{...sans, minHeight:44, padding:'0 18px', background:enCave(w)?I.soft:'transparent', border:'1px solid ' + (enCave(w)?I.bord2:I.wine), borderRadius:999, color:I.wine, fontSize:13, fontWeight:500, cursor:'pointer', whiteSpace:'nowrap'}}>
-                          {added===w.id ? '✓ Ajouté à ma cave' : enCave(w) ? '✓ Dans ma cave' : 'Garder dans ma cave'}
-                        </button>}
-                      </div>
+                      </div>}
                     </div>
                   ))}
+                  {m.avis && <QuestionAvis cle={m.avis} mode="chat" vins={m.wines.map(w => w.id)}/>}
                 </div>
               )}
             </div>
@@ -1898,7 +1838,7 @@ function Chat({setView, collector, customer}) {
           </button>
         </div>
       </div>
-      {modal&&<WineModal wine={modal} onClose={()=>setModal(null)} onCollect={FONCTIONS_CLIENT.maCave ? ()=>{handleCollect(modal);setModal(null);} : null}/>}
+      {modal&&<WineModal wine={modal} onClose={()=>setModal(null)}/>}
     </div>
   );
 }
@@ -1942,163 +1882,6 @@ function AgeGate({onConfirm}) {
               <button onClick={onConfirm} style={{...sans, flex:1.6, minHeight:58, background:I.wine, color:I.bg, border:'none', borderRadius:999, cursor:'pointer', fontSize:15, fontWeight:500}}>Oui, j'ai 18 ans ou plus</button>
               <button onClick={()=>setRefused(true)} style={{...sans, flex:1, minHeight:58, background:'transparent', color:I.wine, border:'1px solid ' + I.bord2, borderRadius:999, cursor:'pointer', fontSize:15}}>Non</button>
             </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ── NOTATION (étoiles) ────────────────────────────────────────────────────────
-function WineRating({wineId, value=0, onRate, size=17}) {
-  const [hover, setHover] = useState(0);
-  return (
-    <div style={{display:'flex',gap:Math.round(size/5),justifyContent:'center'}} onMouseLeave={()=>setHover(0)}>
-      {[1,2,3,4,5].map(s=>(
-        <span key={s} role="button" aria-label={s + ' sur 5'}
-          onClick={e=>{e.stopPropagation(); onRate(wineId, s);}}
-          onMouseEnter={()=>setHover(s)}
-          style={{fontSize:size, cursor:'pointer', lineHeight:1, padding:'2px', color:(hover||value)>=s?C_IVOIRE.wine:C_IVOIRE.bord2, transition:'color .2s', userSelect:'none'}}>★</span>
-      ))}
-    </div>
-  );
-}
-
-// ── LOGIN CARTE CLIENT ────────────────────────────────────────────────────────
-function LoginScreen({setView, customerApi}) {
-  const I = C_IVOIRE;
-  const sans = {fontFamily:'Montserrat,sans-serif'};
-  const [card,    setCard]    = useState('');
-  const [welcome, setWelcome] = useState(null);
-  const inputRef = useRef(null);
-  useEffect(()=>{ inputRef.current && inputRef.current.focus(); },[]);
-
-  const submit = () => {
-    const res = customerApi.login(card);
-    if (!res) return;
-    setCard('');
-    setWelcome(res);
-    setTimeout(()=>setView('home'), 1400);
-  };
-
-  const cust = customerApi.customer;
-  const carte = {background:I.cream, border:'1px solid ' + I.bord, borderRadius:24, padding:'32px 26px'};
-  const boutonPlein = {...sans, minHeight:52, padding:'0 26px', background:I.wine, color:I.bg, border:'none', borderRadius:999, cursor:'pointer', fontSize:14, fontWeight:500};
-  const boutonTrait = {...sans, minHeight:52, padding:'0 26px', background:'transparent', color:I.wine, border:'1px solid ' + I.bord2, borderRadius:999, cursor:'pointer', fontSize:14};
-  const Rond = ({children}) => <div style={{width:72, height:72, margin:'0 auto 18px', borderRadius:'50%', border:'1px solid ' + I.bord2, display:'flex', alignItems:'center', justifyContent:'center', color:I.wine}}>{children}</div>;
-
-  return (
-    <div style={{...sans, minHeight:'var(--ecran, 100vh)', background:I.bg, color:I.ink}}>
-      <Header title="Carte client" subtitle="Programme fidélité du magasin" onBack={()=>setView('home')}/>
-      <div style={{maxWidth:480, margin:'0 auto', padding:'36px 20px 120px', textAlign:'center'}}>
-        {welcome ? (
-          <div style={carte}>
-            <Rond><svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></Rond>
-            <div style={{...serif, fontSize:30, fontWeight:500, color:I.wine, marginBottom:8}}>{welcome.isNew ? 'Bienvenue' : 'Bon retour, ' + welcome.profile.name}</div>
-            <p style={{fontSize:15, color:I.body, lineHeight:1.7, margin:0}}>{welcome.isNew ? 'Votre profil client vient d\'être créé. Votre cave et vos notes seront désormais liées à votre carte.' : 'Votre cave et vos préférences sont chargées. Le sommelier tient compte de vos goûts.'}</p>
-          </div>
-        ) : cust ? (
-          <div style={carte}>
-            <Rond><svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="8.5" r="3.5"/><path d="M5 20c1.2-3.6 4-5.5 7-5.5s5.8 1.9 7 5.5"/></svg></Rond>
-            <div style={{...serif, fontSize:30, fontWeight:500, color:I.wine, marginBottom:4}}>{cust.name}</div>
-            <div style={{fontSize:13, color:I.muted, marginBottom:24}}>{'Carte n° ' + cust.id + ' · client depuis le ' + new Date(cust.createdAt).toLocaleDateString('fr-FR')}</div>
-            <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:26}}>
-              {[['Vins dans ma cave', Object.keys(cust.collection||{}).length], ['Vins notés', Object.keys(cust.ratings||{}).length]].map(([l,v])=>(
-                <div key={l} style={{background:I.bg, border:'1px solid ' + I.bord, borderRadius:16, padding:'18px 10px'}}>
-                  <div style={{...serif, fontSize:34, fontWeight:500, color:I.wine, lineHeight:1}}>{v}</div>
-                  <div style={capsIv(10, I.muted, {letterSpacing:'.14em', marginTop:8})}>{l}</div>
-                </div>
-              ))}
-            </div>
-            <div style={{display:'flex', gap:10, justifyContent:'center', flexWrap:'wrap'}}>
-              <button onClick={()=>setView('collector')} style={boutonPlein}>Ma cave</button>
-              <button onClick={()=>{customerApi.logout();}} style={boutonTrait}>Déconnexion</button>
-            </div>
-            <button onClick={()=>{ if(window.confirm('Supprimer définitivement votre profil de cette borne (cave et notes comprises) ?')){ customerApi.erase(); } }} style={{...sans, minHeight:44, background:'none', border:'none', color:'#9b2c2c', fontSize:13, cursor:'pointer', marginTop:18, textDecoration:'underline', textUnderlineOffset:4}}>Supprimer mes données de cette borne</button>
-          </div>
-        ) : (
-          <div>
-            <Rond><svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M3 10h18M7 15h4"/></svg></Rond>
-            <div style={{...serif, fontSize:34, fontWeight:500, color:I.wine, marginBottom:10, lineHeight:1.1}}>Scannez votre carte</div>
-            <p style={{fontSize:15, color:I.body, lineHeight:1.7, margin:'0 0 26px'}}>Passez votre carte client sous le lecteur de la borne, ou saisissez son numéro.</p>
-            <div style={carte}>
-              <input ref={inputRef} value={card} onChange={e=>setCard(e.target.value)} onKeyDown={e=>e.key==='Enter'&&submit()}
-                placeholder="N° de carte client" inputMode="numeric"
-                style={{...sans, width:'100%', minHeight:58, background:I.bg, border:'1px solid ' + I.bord2, color:I.ink, borderRadius:999, padding:'0 20px', fontSize:18, outline:'none', textAlign:'center', letterSpacing:'.1em', marginBottom:14}}/>
-              <button onClick={submit} disabled={!card.trim()} style={{...boutonPlein, width:'100%', minHeight:56, background:card.trim() ? I.wine : I.bord, cursor:card.trim() ? 'pointer' : 'default', fontSize:15}}>Se connecter</button>
-              <div style={{fontSize:12, color:I.muted, marginTop:14, lineHeight:1.6}}>Le lecteur remplit ce champ et valide tout seul.</div>
-            </div>
-            <div style={{background:I.soft, borderRadius:16, padding:'16px 18px', fontSize:12.5, color:I.body, lineHeight:1.7, textAlign:'left', marginTop:16}}>
-              <div style={capsIv(10, I.wine, {letterSpacing:'.18em', fontWeight:600, marginBottom:6})}>Vos données</div>
-              En vous connectant, votre numéro de carte, votre cave et vos notes sont enregistrés sur cette borne, uniquement pour personnaliser vos recommandations. Aucune donnée nominative n'est transmise à des tiers : seules vos préférences gustatives, anonymes, sont utilisées par le sommelier. Vous pouvez supprimer votre profil à tout moment depuis cet écran, ou en faire la demande à l'accueil du magasin.
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ── COLLECTOR PAGE ────────────────────────────────────────────────────────────
-function CollectorPage({setView, collector, customer}) {
-  const I = C_IVOIRE;
-  const sans = {fontFamily:'Montserrat,sans-serif'};
-  const [filter, setFilter] = useState('all');
-  const ownedWines = WINES.filter(w=>collector.collection[w.id]);
-  const filtered   = filter==='all'?ownedWines:ownedWines.filter(w=>w.type===filter);
-  const nbTypes = [...new Set(ownedWines.map(w=>w.type))].length;
-  const nbNotes = ownedWines.filter(w=>collector.ratings[w.id]).length;
-
-  return (
-    <div style={{...sans, minHeight:'var(--ecran, 100vh)', background:I.bg, color:I.ink}}>
-      <Header title="Ma cave" subtitle={collector.totalCards + ' vin' + (collector.totalCards>1?'s':'') + (collector.points ? ' · ' + collector.points + ' points' : '')} onBack={()=>setView('home')}
-        right={collector.discount>0 ? <div style={{...capsIv(11, I.wine, {letterSpacing:'.1em', fontWeight:600}), border:'1px solid ' + I.wine, borderRadius:999, padding:'10px 14px'}}>{'−' + collector.discount + ' %'}</div> : null}/>
-      <div style={{maxWidth:620, margin:'0 auto', padding:'26px 20px 120px'}}>
-        {ownedWines.length>0 && (
-          <div style={{display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:12, marginBottom:22}}>
-            {[['Vins', collector.totalCards], ['Couleurs', nbTypes], ['Notés', nbNotes]].map(([l,v])=>(
-              <div key={l} style={{background:I.cream, border:'1px solid ' + I.bord, borderRadius:16, padding:'16px 8px', textAlign:'center'}}>
-                <div style={{...serif, fontSize:32, fontWeight:500, color:I.wine, lineHeight:1}}>{v}</div>
-                <div style={capsIv(10, I.muted, {letterSpacing:'.16em', marginTop:7})}>{l}</div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {!customer && (
-          <button onClick={()=>setView('login')} style={{...sans, width:'100%', display:'flex', alignItems:'center', gap:14, textAlign:'left', background:I.cream, border:'1px solid ' + I.bord2, borderRadius:16, padding:'16px 18px', color:I.body, fontSize:14, lineHeight:1.55, cursor:'pointer', marginBottom:22}}>
-            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke={I.wine} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{flexShrink:0}}><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M3 10h18M7 15h4"/></svg>
-            <span><strong style={{color:I.wine, fontWeight:600}}>Scannez votre carte client</strong> pour retrouver votre cave à chaque visite et noter vos vins.</span>
-          </button>
-        )}
-
-        <div style={{display:'flex', gap:8, marginBottom:22, overflowX:'auto', paddingBottom:3}}>
-          {['all','rouge','blanc','rosé','bulles'].map(f=>(
-            <button key={f} onClick={()=>setFilter(f)} style={{...sans, minHeight:44, padding:'0 18px', background:filter===f?I.wine:'transparent', color:filter===f?I.bg:I.ink, border:'1px solid ' + (filter===f?I.wine:I.bord2), borderRadius:999, fontSize:13, cursor:'pointer', whiteSpace:'nowrap', flexShrink:0}}>
-              {f==='all'?'Tous':f.charAt(0).toUpperCase()+f.slice(1)}
-            </button>
-          ))}
-        </div>
-
-        {filtered.length===0 ? (
-          <div style={{textAlign:'center', padding:'40px 10px'}}>
-            <div style={{...serif, fontSize:30, fontWeight:500, color:I.wine, marginBottom:10}}>{ownedWines.length ? 'Aucun vin de cette couleur' : 'Votre cave est vide'}</div>
-            <p style={{fontSize:15, color:I.body, lineHeight:1.7, margin:'0 auto 26px', maxWidth:380}}>Touchez « Garder dans ma cave » sur un vin conseillé pour le retrouver ici, puis le noter après dégustation.</p>
-            <button onClick={()=>setView('selection')} style={{...sans, minHeight:52, padding:'0 28px', background:I.wine, color:I.bg, border:'none', borderRadius:999, cursor:'pointer', fontSize:14, fontWeight:500}}>Trouver mon vin idéal</button>
-          </div>
-        ) : (
-          <div style={{display:'flex', flexWrap:'wrap', gap:18, justifyContent:'center'}}>
-            {filtered.map(w=>(
-              <div key={w.id} style={{display:'flex', flexDirection:'column', alignItems:'center', gap:8}}>
-                <WineCard wine={w} owned={collector.collection[w.id]||0} compact={true}/>
-                {customer && (
-                  <div style={{textAlign:'center'}}>
-                    <WineRating wineId={w.id} value={collector.ratings[w.id]||0} onRate={collector.rateWine} size={24}/>
-                    <div style={capsIv(9, I.muted, {letterSpacing:'.14em', marginTop:3})}>{collector.ratings[w.id] ? 'Votre note' : 'Notez ce vin'}</div>
-                  </div>
-                )}
-              </div>
-            ))}
           </div>
         )}
       </div>
@@ -2265,14 +2048,17 @@ function Depannage({setView}) {
 // ── APP ───────────────────────────────────────────────────────────────────────
 function App() {
   const [view,    setView]    = useState('home');
+  // Mesure : écran affiché pendant la session. La sélection guidée est suivie par
+  // ses étapes (notées par Selection), plus précises que l'écran lui-même.
+  useEffect(() => {
+    const ECRANS = {home:'accueil', results:'resultats', chat:'chat', mystery:'mystere'};
+    if (ECRANS[view]) noterUsage('ecran', {ecran: ECRANS[view]});
+  }, [view]);
   const [results, setResults] = useState([]);
-  const customerApi = useCustomer();
-  const collector = useCollector(customerApi);
 
   // ── Réinitialisation automatique entre deux clients ──────────────────────
-  // Après un temps d'inactivité (aucun clic/toucher/touche), on déconnecte
-  // le client en cours et on revient à l'accueil, pour ne jamais laisser le
-  // profil d'un client visible pour le suivant.
+  // Après un temps d'inactivité (aucun clic/toucher/touche), on revient à
+  // l'accueil : la recherche d'un client n'est jamais laissée au suivant.
   const IDLE_TIMEOUT_MS = 90 * 1000; // 90 secondes — ajustable ici
   const idleTimerRef = useRef(null);
   const veilleRef = useRef(null);
@@ -2289,7 +2075,7 @@ function App() {
   }, []);
 
   const resetForNextCustomer = useCallback(() => {
-    customerApi.logout();
+    terminerSession('inactivite');
     setResults([]);
     setView('home');
     // Chaque nouveau client doit reconfirmer sa majorité — on ne réutilise
@@ -2298,10 +2084,11 @@ function App() {
     setAgeOk(false);
     verifierCatalogue();
     if (window.WS_MODE_CONNECTE && !veilleRef.current) veilleRef.current = setInterval(verifierCatalogue, 5 * 60 * 1000);
-  }, [customerApi, verifierCatalogue]);
+  }, [verifierCatalogue]);
 
   useEffect(() => {
     const scheduleReset = () => {
+      SESSION.derniereActivite = Date.now();
       // Un client touche la borne : plus de vérification en veille.
       if (veilleRef.current) { clearInterval(veilleRef.current); veilleRef.current = null; }
       if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
@@ -2321,7 +2108,7 @@ function App() {
   if (!ageOk) {
     return (
       <div style={{maxWidth:680, margin:'0 auto', fontFamily:'Montserrat,sans-serif'}}>
-        <AgeGate onConfirm={()=>{ try{ sessionStorage.setItem('ws_age_ok','1'); }catch(e){} setAgeOk(true); }}/>
+        <AgeGate onConfirm={()=>{ try{ sessionStorage.setItem('ws_age_ok','1'); }catch(e){} debuterSession(); setAgeOk(true); }}/>
         <SanteBanner/>
       </div>
     );
@@ -2329,17 +2116,15 @@ function App() {
   return (
     <div style={{maxWidth:680, margin:'0 auto', fontFamily:'Montserrat,sans-serif'}}>
       <style>{'@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-10px)}}@keyframes shimmer{0%{background-position:-200% 0}100%{background-position:200% 0}}*{box-sizing:border-box}::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:rgba(212,175,55,.35);border-radius:2px}'}</style>
-      {view==='home'      && <Home          setView={setView} collector={collector} customerApi={customerApi}/>}
-      {view==='login'     && <LoginScreen   setView={setView} customerApi={customerApi}/>}
+      {view==='home'      && <Home          setView={setView}/>}
       {view==='selection' && <Selection     setView={setView} setResults={setResults}/>}
-      {view==='results'   && <Results       setView={setView} results={results} collector={collector}/>}
-      {view==='mystery'   && <Mystery       setView={setView} collector={collector}/>}
-      {view==='chat'      && <Chat          setView={setView} collector={collector} customer={customerApi.customer}/>}
-      {view==='collector' && <CollectorPage setView={setView} collector={collector} customer={customerApi.customer}/>}
+      {view==='results'   && <Results       setView={setView} results={results}/>}
+      {view==='mystery'   && <Mystery       setView={setView}/>}
+      {view==='chat'      && <Chat          setView={setView}/>}
       {view==='depannage' && <Depannage setView={setView}/>}
       {view!=='home' && view!=='depannage' && (
         <button
-          onClick={()=>{ customerApi.logout(); setResults([]); setView('home'); try{ sessionStorage.removeItem('ws_age_ok'); }catch(e){} setAgeOk(false); }}
+          onClick={()=>{ terminerSession('termine'); setResults([]); setView('home'); try{ sessionStorage.removeItem('ws_age_ok'); }catch(e){} setAgeOk(false); }}
           style={{position:'fixed', ...(view==='chat' ? {top:22} : {bottom:56}), right:'max(20px, calc(50% - 316px))', zIndex:50, minHeight:46, background:view==='chat' ? '#ffffff' : C.wine, color:view==='chat' ? C.wine : '#faf6ee', border:'1px solid ' + C.wine, borderRadius:999, padding:'0 22px', fontSize:13, fontWeight:500, letterSpacing:'.03em', cursor:'pointer', boxShadow:view==='chat' ? 'none' : '0 12px 30px rgba(94,22,34,.22)', fontFamily:'Montserrat,sans-serif'}}
         >J'ai terminé</button>
       )}

@@ -101,13 +101,13 @@ const PIN_LOCKOUT_MS = 60 * 1000;
 
 // ── Session admin (token) ───────────────────────────────────────────────────
 // Avant : le PIN protégeait l'écran Admin côté React, mais les routes REST
-// d'écriture (/api/profiles, /api/global-ratings, /api/stock-overrides)
+// d'écriture (/api/stock-overrides...)
 // acceptaient n'importe quel POST sans aucune vérification — quelqu'un avec
 // un accès réseau à la borne pouvait écraser ces fichiers sans jamais taper
 // le PIN. On délivre maintenant un token à la validation du PIN, à fournir
 // en header X-Admin-Token sur les routes qui doivent rester admin-only.
-// (profiles/global-ratings restent ouvertes en écriture : elles sont
-// alimentées en continu par les clients eux-mêmes, pas seulement l'admin.)
+// (Les anciennes routes /api/profiles et /api/global-ratings, profils et notes
+// des clients, sont supprimées depuis novembre 2026 : plus de comptes clients.)
 const adminTokens = new Map(); // token -> expiresAt
 const ADMIN_TOKEN_TTL_MS = 2 * 60 * 60 * 1000; // 2h, large pour une session gérant
 
@@ -209,18 +209,22 @@ app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'WineSelect.html'))
 // usage local. 30/min est large pour un usage normal (quelques messages
 // par session de chat) tout en bloquant un emballement.
 const rateLimitHits = new Map(); // ip -> [timestamps des requêtes dans la dernière minute]
-function rateLimit(maxPerMinute) {
+// groupe : compteur à part (ex. 'mesures' : satisfaction et usage, qui ne doivent
+// pas entamer les 30 appels à l'IA par minute de l'écran).
+const rateLimitGroupes = { '': rateLimitHits };
+function rateLimit(maxPerMinute, groupe) {
+  const carte = rateLimitGroupes[groupe || ''] || (rateLimitGroupes[groupe] = new Map());
   return (req, res, next) => {
     const ip = req.ip || req.socket.remoteAddress || 'unknown';
     const now = Date.now();
     const windowStart = now - 60 * 1000;
-    const hits = (rateLimitHits.get(ip) || []).filter(t => t > windowStart);
+    const hits = (carte.get(ip) || []).filter(t => t > windowStart);
     if (hits.length >= maxPerMinute) {
       console.warn('⚠️  Limite de débit atteinte pour', ip, '(' + hits.length + ' requêtes/min sur ' + req.path + ')');
       return res.status(429).json({ error: 'Trop de requêtes. Réessaie dans quelques instants.' });
     }
     hits.push(now);
-    rateLimitHits.set(ip, hits);
+    carte.set(ip, hits);
     next();
   };
 }
@@ -228,20 +232,18 @@ function rateLimit(maxPerMinute) {
 // devenues inactives (mémoire, pas fichier — pas de risque de corruption).
 setInterval(() => {
   const cutoff = Date.now() - 60 * 1000;
-  for (const [ip, hits] of rateLimitHits) {
-    const fresh = hits.filter(t => t > cutoff);
-    if (fresh.length) rateLimitHits.set(ip, fresh);
-    else rateLimitHits.delete(ip);
+  for (const carte of Object.values(rateLimitGroupes)) {
+    for (const [ip, hits] of carte) {
+      const fresh = hits.filter(t => t > cutoff);
+      if (fresh.length) carte.set(ip, fresh);
+      else carte.delete(ip);
+    }
   }
 }, 10 * 60 * 1000).unref();
 
 // ── Persistance serveur (data/*.json) ───────────────────────────────────────
-// Sauvegarde de secours des données client (profils, notes, stocks importés).
-// Le front continue de fonctionner en priorité avec localStorage (rapide,
-// aucune dépendance réseau pour l'usage normal) ; ces routes servent de
-// copie de sûreté et de point de restauration en cas de borne réinstallée
-// ou de cache navigateur vidé — voir bouton "Restaurer depuis le serveur"
-// dans Admin > Config.
+// Données de la borne en mode autonome (stocks importés, stratégie, prix d'achat,
+// réponses de satisfaction et mesures d'usage). Aucune donnée sur les clients.
 const DATA_DIR = path.join(__dirname, 'data');
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 
@@ -284,8 +286,6 @@ function makePersistedRoute(name, opts) {
   });
 }
 
-makePersistedRoute('profiles');         // ws_profiles — écriture continue par les clients, pas admin-only
-makePersistedRoute('global-ratings');   // ws_global_ratings — idem
 // stock-overrides : alimenté UNIQUEMENT depuis Admin > Config (import CSV /
 // mise en avant), donc protégé par token admin. onWrite réapplique aussitôt
 // les overrides sur le catalogue servi au sommelier (voir applyStockOverrides).
@@ -495,6 +495,7 @@ async function synchroniser() {
     ETAT_CENTRAL.joignable = true;
     ETAT_CENTRAL.derniereSynchro = new Date().toISOString();
     ETAT_CENTRAL.derniereErreur = null;
+    envoyerMesuresEnAttente(); // satisfaction et usage gardés pendant une coupure
   } catch (e) {
     if (ETAT_CENTRAL.joignable !== false) console.warn('⚠️  Serveur central injoignable (' + e.message + ') : la borne continue avec sa copie locale.');
     ETAT_CENTRAL.joignable = false;
@@ -608,6 +609,115 @@ app.post('/selection-accord', rateLimit(30), (req, res) => {
       : SOMMELIER.selectionAccord(req.body || {}, envSommelier()).then(repondre(res)), erreur500(res));
   }
   SOMMELIER.selectionAccord(req.body || {}, envSommelier()).then(repondre(res), erreur500(res));
+});
+
+// ── Mesures des pilotes : satisfaction et usage (novembre 2026) ──────────────
+// Tout est ANONYME : aucune donnée sur le client, aucun texte saisi.
+// • Satisfaction : « Ce conseil vous aide-t-il ? » { utile, mode, occasion,
+//   budget, vins, session }.
+// • Usage : une session (numéro tiré au hasard par l'écran pour un passage
+//   devant la borne) et ses événements : début, écrans, étapes du parcours,
+//   vins proposés, fiches ouvertes, fin.
+// La borne ajoute à chaque envoi un identifiant tiré au hasard (uid : un envoi
+// répété n'est compté qu'une fois) et l'heure de réception.
+// • Connectée : file d'attente sur le disque (cache-central/), envoyée tout de
+//   suite au serveur central, sinon à la prochaine synchronisation réussie (toutes
+//   les 5 minutes). Une réinstallation depuis l'écran de dépannage vide ces files
+//   avec la copie du catalogue : rien ne part jamais vers un autre magasin.
+// • Autonome : gardé dans data/ (aucun serveur où l'envoyer).
+// Le contrôle complet des valeurs est fait par le serveur central.
+const MODES_MESURE = ['guide', 'chat', 'surprise'];
+const TYPES_USAGE = ['session', 'ecran', 'etape', 'resultats', 'fiche', 'fin'];
+const SESSION_VALIDE = /^[A-Za-z0-9_-]{8,40}$/;
+
+function lireFichierListe(fichier) {
+  try { const l = JSON.parse(fs.readFileSync(fichier, 'utf-8')); return Array.isArray(l) ? l : []; }
+  catch (e) { return []; }
+}
+function ecrireFichierListe(fichier, liste) {
+  fs.mkdirSync(path.dirname(fichier), { recursive: true });
+  fs.writeFileSync(fichier + '.tmp', JSON.stringify(liste), 'utf-8');
+  fs.renameSync(fichier + '.tmp', fichier);
+}
+
+// Une file : fichier local, route du serveur central, nom de la liste envoyée.
+function fileDeMesures(o) {
+  const enAttente = path.join(DOSSIER_CACHE, o.nom + '-en-attente.json');
+  const autonome = dataFile(o.nom);
+  let enCours = false;
+  async function envoyer() {
+    if (!CONNEXION || enCours) return;
+    enCours = true;
+    try {
+      for (let tour = 0; tour < 20; tour++) {
+        const lot = lireFichierListe(enAttente).slice(0, o.parEnvoi);
+        if (!lot.length) return;
+        let r;
+        try { r = await appelCentral(o.chemin, { corps: { [o.cle]: lot } }); }
+        catch (e) { return; } // injoignable : nouvel essai à la prochaine synchronisation
+        if (r.status !== 200 && r.status !== 400) return; // serveur occupé ou en panne : on garde tout
+        if (r.status === 400) console.warn('⚠️  ' + o.nom + ' : lot refusé par le serveur central (' + ((r.corps && r.corps.error) || 'HTTP 400') + '), abandonné.');
+        // Envoyé (ou refusé définitivement) : retiré de la file, relue car une
+        // nouvelle mesure a pu arriver pendant l'envoi.
+        const envoyes = new Set(lot.map(x => x.uid));
+        ecrireFichierListe(enAttente, lireFichierListe(enAttente).filter(x => !envoyes.has(x.uid)));
+      }
+    } catch (e) {
+      console.warn('⚠️  ' + o.nom + ' : envoi impossible (' + e.message + ').');
+    } finally {
+      enCours = false;
+    }
+  }
+  function ajouter(mesure) {
+    const fichier = CONNEXION ? enAttente : autonome;
+    const element = Object.assign({ uid: crypto.randomUUID(), le: new Date().toISOString() }, mesure);
+    ecrireFichierListe(fichier, lireFichierListe(fichier).concat([element]).slice(-o.max));
+    envoyer();
+  }
+  return { ajouter, envoyer };
+}
+const FILE_SATISFACTION = fileDeMesures({ nom: 'satisfaction', chemin: '/satisfaction', cle: 'reponses', parEnvoi: 50, max: 2000 });
+const FILE_USAGE = fileDeMesures({ nom: 'usage', chemin: '/evenements', cle: 'evenements', parEnvoi: 100, max: 20000 });
+function envoyerMesuresEnAttente() { FILE_SATISFACTION.envoyer(); FILE_USAGE.envoyer(); }
+
+const texteCourt = (v, max) => typeof v === 'string' ? v.slice(0, max) : null;
+const entier = v => Number.isInteger(v) && v >= 0 ? v : null;
+const listeVins = v => Array.isArray(v) ? v.filter(id => Number.isInteger(id) && id > 0).slice(0, 3) : [];
+
+function enregistrer(file, mesure, res) {
+  try { file.ajouter(mesure); }
+  catch (e) {
+    console.error('❌ Mesure non enregistrée :', e.message);
+    return res.status(500).json({ ok: false });
+  }
+  res.json({ ok: true });
+}
+
+app.post('/api/satisfaction', rateLimit(120, 'mesures'), (req, res) => {
+  const b = req.body || {};
+  const vins = listeVins(b.vins);
+  if (typeof b.utile !== 'boolean' || !MODES_MESURE.includes(b.mode) || !vins.length) {
+    return res.status(400).json({ ok: false, error: 'Réponse invalide.' });
+  }
+  enregistrer(FILE_SATISFACTION, {
+    utile: b.utile, mode: b.mode, occasion: texteCourt(b.occasion, 20), budget: texteCourt(b.budget, 10), vins,
+    session: typeof b.session === 'string' && SESSION_VALIDE.test(b.session) ? b.session : null,
+  }, res);
+});
+
+app.post('/api/evenements', rateLimit(120, 'mesures'), (req, res) => {
+  const b = req.body || {};
+  if (!TYPES_USAGE.includes(b.type) || typeof b.session !== 'string' || !SESSION_VALIDE.test(b.session)) {
+    return res.status(400).json({ ok: false, error: 'Événement invalide.' });
+  }
+  // Seuls les champs prévus pour ce type passent.
+  const e = { session: b.session, type: b.type };
+  if (b.type === 'ecran') e.ecran = texteCourt(b.ecran, 20);
+  if (b.type === 'etape') e.etape = texteCourt(b.etape, 20);
+  if (b.type === 'resultats') Object.assign(e, { mode: texteCourt(b.mode, 10), occasion: texteCourt(b.occasion, 20), budget: texteCourt(b.budget, 10), vins: listeVins(b.vins) });
+  if (b.type === 'fiche') Object.assign(e, { mode: texteCourt(b.mode, 10), vin: entier(b.vin) });
+  if (b.type === 'fin') Object.assign(e, { raison: texteCourt(b.raison, 15), duree_s: entier(b.duree_s) });
+  enregistrer(FILE_USAGE, e, res);
 });
 
 // sommelier.js est arrivé avec la mise à jour d'octobre 2026. Une borne encore
