@@ -158,6 +158,7 @@ const PAIRING_COLORS = {
   poisson:'#3E6FA6', 'fruits de mer':'#2E8B92',
   'apéritif':'#D45C87', dessert:'#7A3F5C',
   'méditerranéen':'#7A8C4A', asiatique:'#D9932E',
+  noel:'#3F6B4E',
 };
 const PAIRING_COLORS_LIGHT = {
   viande:'#D99B9B', charcuterie:'#D3B092', barbecue:'#DDA87F',
@@ -226,6 +227,8 @@ function PairingIcon({id, color, size=24}){
       return <svg width={size} height={size} viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg"><path d="M6 15c3-1 6 1 8 0s5-2 8-1" {...s}/><path d="M5 15c0 5 3 9 11 9s11-4 11-9" {...s}/><path d="M9 24l-1 3M23 24l1 3" {...s}/></svg>;
     case 'barbecue':
       return <svg width={size} height={size} viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg"><path d="M16 4c1 4-3 5-3 9 0 2 1.5 3.5 3.5 3.5S20 17 20 15c2 2 3 4 3 6.5 0 4-3 7-7 7s-7-3-7-7c0-6 5-8 7-17.5z" {...s}/></svg>;
+    case 'noel':
+      return <svg width={size} height={size} viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg"><path d="M16 4l-5 7h3l-5 7h3l-6 7h20l-6-7h3l-5-7h3l-5-7z" {...s}/><path d="M16 25v3.5" {...s}/></svg>;
     default: return null;
   }
 }
@@ -325,6 +328,23 @@ const PAIRING_DETAILS = {
     {id:'bleu', label:'Bleu (roquefort)'},
   ],
 };
+// Menu de Noël : case de « Qu'allez-vous manger ? » affichée du 15 novembre au 6 janvier
+// (date de la tablette). Chaque plat a un profil écrit à la main dans accords.js
+// (PLATS_CATEGORIES['noel/...']), utilisé aussi en mode autonome, sans IA.
+// repli : catégorie voisine, seulement si le serveur de la borne ne répond pas du tout.
+const NOEL_PLATS = [
+  {id:'huitres',   label:'Huîtres',          repli:'fruits de mer'},
+  {id:'saumon',    label:'Saumon fumé',      repli:'poisson'},
+  {id:'foiegras',  label:'Foie gras',        repli:'dessert'},
+  {id:'stjacques', label:'Saint-Jacques',    repli:'fruits de mer'},
+  {id:'chapon',    label:'Chapon ou dinde',  repli:'volaille'},
+  {id:'buche',     label:'Bûche et desserts', repli:'dessert'},
+];
+function periodeNoel(date) {
+  const d = date || new Date();
+  const m = d.getMonth() + 1, j = d.getDate();
+  return (m === 11 && j >= 15) || m === 12 || (m === 1 && j <= 6);
+}
 // Habillage des cartes : le même pour tous les vins. Il n'y a plus de note de qualité
 // propre à un vin (subjective) : la seule appréciation affichée est l'accord avec la
 // recherche du client (wine.accord, calculé par le moteur d'accords).
@@ -1128,9 +1148,9 @@ function Selection({setView, setResults}) {
   const total = occasion === 'repas' || typeDabord ? 4 : 3;
   const STEP = typeDabord
     ? {occasion:1, couleur:2, gout:3, budget:4, thinking:total}
-    : {occasion:1, gout:2, plat:2, precision:2, libre:2, recette:2, budget:3, couleur:4, info:2, thinking:total};
+    : {occasion:1, gout:2, plat:2, precision:2, noel:2, libre:2, recette:2, budget:3, couleur:4, info:2, thinking:total};
   const LABEL = {
-    occasion:'Occasion', gout: occasion === 'offrir' ? 'Ses goûts' : 'Vos goûts', plat:'Votre plat',
+    occasion:'Occasion', gout: occasion === 'offrir' ? 'Ses goûts' : 'Vos goûts', plat:'Votre plat', noel:'Votre plat',
     precision:'Préparation', libre: occasion === 'cuisiner' ? 'Votre recette' : 'Votre plat',
     recette:'Votre recette', budget:'Budget', couleur: typeDabord ? 'Type de vin' : 'Préférence', info:'Votre recette', thinking:'Sélection',
   };
@@ -1146,7 +1166,7 @@ function Selection({setView, setResults}) {
   const pickGout = g => { setGout(g); go('budget'); };
   const pickPairing = p => {
     setPairing(p); setDetail(null); setPlatLibre('');
-    go(PAIRING_DETAILS[p] ? 'precision' : 'budget');
+    go(p === 'noel' ? 'noel' : PAIRING_DETAILS[p] ? 'precision' : 'budget');
   };
   const pickDetail = d => { setDetail(d); go('budget'); };
   const pickRecette = r => { setRecette(r); setRecetteLibre(''); go('budget'); };
@@ -1193,7 +1213,8 @@ function Selection({setView, setResults}) {
   const localFallback = o => {
     const rec = RECETTES_UI.find(x => x.id === o.recette);
     const type = o.couleur || (o.occasion === 'cuisiner' && rec ? rec.couleur : null);
-    const p = o.occasion === 'repas' ? o.pairing : o.occasion === 'aperitif' ? 'apéritif' : null;
+    const platNoel = o.pairing === 'noel' ? NOEL_PLATS.find(x => x.id === o.detail) : null;
+    const p = o.occasion === 'repas' ? (o.pairing === 'noel' ? (platNoel ? platNoel.repli : null) : o.pairing) : o.occasion === 'aperitif' ? 'apéritif' : null;
     // Apéritif et cadeau avec un goût précis : les vins les plus proches de ce goût, à prix croissants
     const parGout = (o.occasion === 'aperitif' || o.occasion === 'offrir') && o.gout && o.gout !== 'inconnu' && Object.keys(PROFILS_VINS).length;
     let r = parGout
@@ -1269,7 +1290,8 @@ function Selection({setView, setResults}) {
   const goutsCouleur = typeDabord && GOUTS_PAR_COULEUR[couleur];
   const goutsOrdre = goutsCouleur ? (offrir ? [inconnu].concat(goutsCouleur) : goutsCouleur.concat([inconnu]))
     : offrir ? [inconnu].concat(GOUTS_UI.slice(0,4)) : GOUTS_UI;
-  const platsOpts = PAIRINGS.filter(p => p.id !== 'apéritif');
+  // Du 15 novembre au 6 janvier, « Menu de Noël » en tête de liste
+  const platsOpts = (periodeNoel() ? [{id:'noel', label:'Menu de Noël'}] : []).concat(PAIRINGS.filter(p => p.id !== 'apéritif'));
 
   return (
     <div style={{minHeight:'var(--ecran, 100vh)', background:C.bg, color:C.ink, paddingBottom:96}}>
@@ -1337,6 +1359,22 @@ function Selection({setView, setResults}) {
                 onMouseEnter={e => e.currentTarget.style.borderColor = C.wine} onMouseLeave={e => e.currentTarget.style.borderColor = C.bord}>
                 Peu importe, conseillez-moi
               </div>
+            </div>
+          </div>
+        )}
+
+        {screen === 'noel' && (
+          <div>
+            {titre('Quel plat ?')}
+            <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:10}}>
+              {NOEL_PLATS.map(d => (
+                <div key={d.id} onClick={() => pickDetail(d)} style={{background:C.cream, border:'1px solid ' + C.bord, borderRadius:14, padding:'18px 12px', minHeight:72, display:'flex', alignItems:'center', justifyContent:'center', textAlign:'center', cursor:'pointer', transition:'border-color .3s'}}
+                  onMouseEnter={e => { e.currentTarget.style.borderColor = C.wine; }}
+                  onMouseLeave={e => { e.currentTarget.style.borderColor = C.bord; }}>
+                  <div style={{...serif, fontSize:18, fontWeight:600, color:C.ink, lineHeight:1.2}}>{d.label}</div>
+                </div>
+              ))}
+              <BoutonLibre label="Un autre plat ? Dites-le" onClick={ouvrirLibre}/>
             </div>
           </div>
         )}

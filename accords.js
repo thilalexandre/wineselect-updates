@@ -103,6 +103,9 @@ function nettoyer(d) {
     sucre: n(d.sucre, 0, 3, 0), epice: n(d.epice, 0, 3, 0), aromatique: n(d.aromatique, 0, 3, 0),
     iode: n(d.iode, 0, 3, 0), sousbois: n(d.sousbois, 0, 3, 0), intensite: n(d.intensite, 1, 3, 2),
     affinite_moelleux: d.affinite_moelleux === true,
+    // Bulles classiques avec ce plat : posé seulement par les profils écrits à la main
+    // (menu de Noël), jamais par l'analyse IA d'un plat dicté.
+    affinite_bulles: d.affinite_bulles === true,
     region: d.region ? String(d.region).slice(0, 40) : null,
     couleur_demandee: LISTES.couleur.includes(couleur) ? couleur : null,
     sucrosite_demandee: d.sucrosite_demandee == null ? null : n(d.sucrosite_demandee, 0, 3, null),
@@ -122,11 +125,12 @@ function noterVin(wine, d) {
   const veto = raison => ({ score: -100, plus: [], moins: [raison] });
 
   const mer = d.proteine === 'poisson' || d.proteine === 'fruits de mer';
-  const viandeRouge = ['boeuf', 'agneau', 'gibier', 'canard'].includes(d.proteine);
+  const foieGrasOuBleu = d.affinite_moelleux && d.gras >= 3 && ['canard', 'fromage'].includes(d.proteine);
+  // Le foie gras n'est pas une viande rouge : pas de bonus tannique, pas de malus pour le blanc
+  const viandeRouge = ['boeuf', 'agneau', 'gibier', 'canard'].includes(d.proteine) && !foieGrasOuBleu;
   const dessert = d.proteine === 'dessert' || d.sucre >= 2;
   const creme = ['creme', 'beurre', 'fromage', 'champignons'].includes(d.sauce);
   const tendre = ['mijote', 'gratine', 'poche'].includes(d.cuisson);
-  const foieGrasOuBleu = d.affinite_moelleux && d.gras >= 3 && ['canard', 'fromage'].includes(d.proteine);
   // Plat très gras : un vin vif et plus léger « allège » (fondue + Apremont, choucroute + Riesling)
   const allege = d.gras >= 3 && p.fraicheur === 3 && (t === 'blanc' || t === 'bulles');
 
@@ -205,6 +209,7 @@ function noterVin(wine, d) {
     if (creme && p.tanins === 3) add(-12, 'tanins fermes durs sur la crème');
     if (creme && p.tanins === 1) add(4, 'tanins souples compatibles avec la sauce');
     if (d.proteine === 'volaille' && p.tanins === 1) add(8, 'rouge souple sur volaille');
+    if (d.proteine === 'volaille' && ['roti', 'grille'].includes(d.cuisson) && p.tanins <= 2 && p.fruit === 1) add(6, 'tanins mesurés et fruit frais sur la volaille rôtie');
     if (['grille', 'roti'].includes(d.cuisson) && p.boise >= 1) add(4, 'élevage qui répond au rôti/grillé');
     if (['mijote', 'gratine'].includes(d.cuisson) && p.fruit >= 2) add(5, 'fruit mûr pour un plat mijoté');
     if (['cru', 'vapeur', 'poche'].includes(d.cuisson) && p.boise === 2) add(-10, 'boisé trop marqué pour une cuisson douce');
@@ -251,8 +256,9 @@ function noterVin(wine, d) {
   }
 
   if (t === 'bulles') {
-    const contexteBulles = d.cuisson === 'frit' || d.iode >= 2 || creme || dessert || d.proteine === 'aucun';
+    const contexteBulles = d.cuisson === 'frit' || d.iode >= 2 || creme || dessert || d.proteine === 'aucun' || d.affinite_bulles;
     if (!contexteBulles) add(-8, null);
+    if (d.affinite_bulles) add(12, 'bulles classiques avec ce plat');
     if (d.cuisson === 'frit') add(15, 'bulles et friture');
     if (d.iode >= 2 && p.dosage <= 1) add(10, 'bulles vives sur l\'iode');
     if (p.vinosite === 3 && d.corps >= 2) add(8, 'bulles vineuses qui tiennent le plat');
@@ -348,6 +354,9 @@ function vivier(lst, couleurGardee) {
 }
 const ARTICLE = { rouge: 'du rouge', blanc: 'du blanc', 'rosé': 'du rosé', bulles: 'des bulles' };
 const PLURIEL = { rouge: 'rouges', blanc: 'blancs', 'rosé': 'rosés', bulles: 'vins effervescents' };
+// Compromis de couleur : « légers, tanins souples, servis frais » ne vaut que pour le rouge
+// (rouge sur la mer). Autre couleur (ex. bulles sur une bûche) : seulement peu de vins adaptés.
+const precisionCompromis = col => col === 'rouge' ? ' (légers, tanins souples, à servir frais vers 12 °C)' : '';
 
 // ── Stratégie de recommandation du magasin (Admin → Config) ─────────────────
 // La PERTINENCE d'abord : la stratégie ne sert qu'à départager des vins à peu près
@@ -568,6 +577,13 @@ const PLATS_CATEGORIES = {
   'méditerranéen':  { plat: 'cuisine méditerranéenne', proteine: 'aucun', sauce: 'tomate', corps: 2, acidite: 2, aromatique: 2, intensite: 2 },
   'asiatique':      { plat: 'cuisine asiatique', proteine: 'volaille', cuisson: 'poele', corps: 2, epice: 1, aromatique: 2, sucre: 1, intensite: 3, affinite_moelleux: true },
   'barbecue':       { plat: 'barbecue, grillades', proteine: 'porc', cuisson: 'grille', corps: 3, gras: 2, intensite: 3 },
+  // Menu de Noël (bouton affiché du 15 novembre au 6 janvier) : profils validés le 9 nov. 2026
+  'noel/huitres':   { plat: 'huîtres', proteine: 'fruits de mer', cuisson: 'cru', corps: 1, gras: 0, acidite: 1, iode: 3, intensite: 2, affinite_bulles: true },
+  'noel/saumon':    { plat: 'saumon fumé', proteine: 'poisson', cuisson: 'cru', corps: 2, gras: 2, iode: 1, aromatique: 1, intensite: 2, affinite_bulles: true },
+  'noel/foiegras':  { plat: 'foie gras', proteine: 'canard', cuisson: 'aucune', corps: 3, gras: 3, intensite: 3, affinite_moelleux: true, affinite_bulles: true },
+  'noel/stjacques': { plat: 'noix de Saint-Jacques', proteine: 'fruits de mer', cuisson: 'poele', sauce: 'beurre', corps: 2, gras: 2, iode: 1, intensite: 1, affinite_bulles: true },
+  'noel/chapon':    { plat: 'chapon ou dinde rôtis', proteine: 'volaille', cuisson: 'roti', corps: 2, gras: 2, sousbois: 1, intensite: 2 },
+  'noel/buche':     { plat: 'bûche et desserts', proteine: 'dessert', sucre: 2, corps: 2, intensite: 2, affinite_bulles: true },
 };
 function platDepuisCategorie(pairing, detailId) {
   const base = PLATS_CATEGORIES[pairing + '/' + detailId] || PLATS_CATEGORIES[pairing];
@@ -1137,7 +1153,7 @@ async function preparerSommelier(env) {
     const nb = available.filter(w => w.type === col).length;
     console.log('⚖️  Compromis couleur :', col, '→', nb, 'vin(s) de cette couleur retenu(s)');
     inject += nb
-      ? '\nLe client veut ' + ARTICLE[col] + ', qui s\'accorde mal avec ce plat. On respecte son choix : les ' + PLURIEL[col] + ' de la liste sont les seuls acceptables (légers, tanins souples, à servir frais vers 12 °C). Propose-en EXACTEMENT ' + Math.min(2, nb) + ' en expliquant honnêtement ce compromis en une phrase, puis UN vin d\'une autre couleur de la liste, présenté comme l\'accord le plus sûr. Présente les 3 vins par prix croissant : l\'alternative prend sa place selon son prix, pas forcément en dernier.'
+      ? '\nLe client veut ' + ARTICLE[col] + ', qui s\'accorde mal avec ce plat. On respecte son choix : les ' + PLURIEL[col] + ' de la liste sont les seuls acceptables' + precisionCompromis(col) + '. Propose-en EXACTEMENT ' + Math.min(2, nb) + ' en expliquant honnêtement ce compromis en une phrase, puis UN vin d\'une autre couleur de la liste, présenté comme l\'accord le plus sûr. Présente les 3 vins par prix croissant : l\'alternative prend sa place selon son prix, pas forcément en dernier.'
       : '\nLe client veut ' + ARTICLE[col] + ', mais aucun vin de cette couleur ne convient à ce plat : dis-le honnêtement en une phrase simple, sans le culpabiliser, puis propose les vins d\'autres couleurs de la liste.';
   } else if (plat.couleur_demandee) inject += '\nLe client veut du ' + plat.couleur_demandee + ' : ne propose que du ' + plat.couleur_demandee + '.';
   if (plat.sucrosite_demandee != null) inject += '\nLe client demande un vin ' + ['sec', 'demi-sec', 'moelleux', 'liquoreux'][plat.sucrosite_demandee] + ' : respecte ce style.';
@@ -1256,11 +1272,13 @@ async function selectionGuidee(body, bracket, featuredSet, res, env) {
     const nb = candidates.filter(w => w.type === col).length;
     console.log('⚖️  Compromis couleur :', col, '→', nb, 'vin(s) de cette couleur retenu(s)');
     contexte += nb
-      ? ' ATTENTION : le client a demandé ' + ARTICLE[col] + ', qui s\'accorde mal avec ce plat. On respecte son choix : les ' + PLURIEL[col] + ' de la liste sont les seuls acceptables (légers, tanins souples, à servir frais vers 12 °C). Retiens-en EXACTEMENT ' + Math.min(2, nb) + ', et complète avec UN vin d\'une autre couleur, l\'accord le plus sûr, avec le rôle "decouverte".'
+      ? ' ATTENTION : le client a demandé ' + ARTICLE[col] + ', qui s\'accorde mal avec ce plat. On respecte son choix : les ' + PLURIEL[col] + ' de la liste sont les seuls acceptables' + precisionCompromis(col) + '. Retiens-en EXACTEMENT ' + Math.min(2, nb) + ', et complète avec UN vin d\'une autre couleur, l\'accord le plus sûr, avec le rôle "decouverte".'
       : ' ATTENTION : le client a demandé ' + ARTICLE[col] + ', mais aucun vin de cette couleur ne convient à ce plat : choisis parmi les autres couleurs de la liste.';
     contexte += ' Dans "message", explique ce choix au client en une phrase simple et bienveillante.';
     messageInfo = nb
-      ? 'Avec ce plat, ' + ARTICLE[col] + ' doit rester très léger et servi bien frais : voici les plus adaptés, et en découverte, l\'accord le plus sûr.'
+      ? (col === 'rouge'
+        ? 'Avec ce plat, ' + ARTICLE[col] + ' doit rester très léger et servi bien frais : voici les plus adaptés, et en découverte, l\'accord le plus sûr.'
+        : 'Peu de ' + PLURIEL[col] + ' de cette tranche conviennent à ce plat : voici les plus adaptés, et en découverte, l\'accord le plus sûr.')
       : 'Avec ce plat, ' + ARTICLE[col] + ' se marie mal : voici les accords les plus justes dans d\'autres couleurs.';
   }
   // Compromis : combien de vins de la couleur demandée dans les 3 (2, ou 1 s'il n'y en a qu'un)
