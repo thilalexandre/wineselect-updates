@@ -489,6 +489,57 @@ function chargerCacheCentral() {
   }
 }
 
+// ── Photos des vins (mode connecté) ─────────────────────────────────────────
+// Le champ photo d'un vin vaut « photos-magasin/<fichier> » : la photo est servie
+// par le serveur central (aux seules bornes du magasin) et gardée ici, dans
+// cache-central/photos/, pour rester affichée sans Internet.
+const PREFIXE_PHOTO = 'photos-magasin/';
+const DOSSIER_PHOTOS = path.join(DOSSIER_CACHE, 'photos');
+const NOM_PHOTO = /^[\w-]{1,64}\.(png|jpe?g|webp)$/i;
+const TYPES_PHOTO = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp' };
+async function telechargerPhoto(fichier) {
+  if (!CONNEXION || !NOM_PHOTO.test(fichier)) return false;
+  const r = await fetch(CONNEXION.serveur + '/api/borne/photos/' + encodeURIComponent(fichier), {
+    headers: { Authorization: 'Bearer ' + CONNEXION.jeton, 'X-WineSelect-Version': VERSION_BORNE },
+    signal: AbortSignal.timeout(20000),
+  });
+  if (r.status !== 200 || !/^image\//.test(r.headers.get('content-type') || '')) return false;
+  const contenu = Buffer.from(await r.arrayBuffer());
+  if (!contenu.length || contenu.length > 5 * 1024 * 1024) return false;
+  fs.mkdirSync(DOSSIER_PHOTOS, { recursive: true });
+  const cible = path.join(DOSSIER_PHOTOS, fichier);
+  fs.writeFileSync(cible + '.tmp', contenu);
+  fs.renameSync(cible + '.tmp', cible);
+  return true;
+}
+let photosEnCours = false;
+async function telechargerPhotosManquantes(vins) {
+  if (photosEnCours || !CONNEXION) return;
+  photosEnCours = true;
+  let recues = 0;
+  try {
+    const fichiers = [...new Set((vins || []).map(w => String(w.photo || ''))
+      .filter(p => p.startsWith(PREFIXE_PHOTO)).map(p => p.slice(PREFIXE_PHOTO.length)))]
+      .filter(f => NOM_PHOTO.test(f) && !fs.existsSync(path.join(DOSSIER_PHOTOS, f)));
+    for (const f of fichiers) {
+      try { if (await telechargerPhoto(f)) recues++; } catch (e) { break; } // central injoignable : on reprendra
+    }
+    if (recues) console.log('🖼  Photos : ' + recues + ' reçue(s) du serveur central');
+  } finally { photosEnCours = false; }
+}
+app.get('/' + PREFIXE_PHOTO + ':fichier', async (req, res) => {
+  const fichier = String(req.params.fichier || '');
+  if (!NOM_PHOTO.test(fichier)) return res.status(404).end();
+  const chemin = path.join(DOSSIER_PHOTOS, fichier);
+  if (!fs.existsSync(chemin)) {
+    try { await telechargerPhoto(fichier); } catch (e) { /* hors connexion : l'écran dessine la bouteille */ }
+    if (!fs.existsSync(chemin)) return res.status(404).end();
+  }
+  res.type(TYPES_PHOTO[fichier.split('.').pop().toLowerCase()]);
+  res.set('Cache-Control', 'public, max-age=86400');
+  res.sendFile(chemin);
+});
+
 async function synchroniser() {
   try {
     const conf = await appelCentral('/config');
@@ -508,6 +559,7 @@ async function synchroniser() {
     ETAT_CENTRAL.derniereSynchro = new Date().toISOString();
     ETAT_CENTRAL.derniereErreur = null;
     envoyerMesuresEnAttente(); // satisfaction et usage gardés pendant une coupure
+    telechargerPhotosManquantes(BASE_CATALOG); // en arrière-plan, sans bloquer la synchronisation
   } catch (e) {
     if (ETAT_CENTRAL.joignable !== false) console.warn('⚠️  Serveur central injoignable (' + e.message + ') : la borne continue avec sa copie locale.');
     ETAT_CENTRAL.joignable = false;

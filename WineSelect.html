@@ -89,11 +89,20 @@ CATALOG.forEach(c => { const w = WINES.find(x => x.id === c.id); if (w) c.name =
 // Photo de la bouteille si elle existe (chemin du type photos/123.jpg, relatif au
 // dossier de la borne, ou adresse web). Sinon, ou si l'image ne charge pas,
 // l'illustration dessinée habituelle.
+// Jamais agrandie au-delà de sa taille réelle (mieux vaut une petite image nette
+// qu'une grande floue) : hauteur au plus h, et au plus sa hauteur en pixels divisée
+// par la densité de l'écran (1,5 sur la Surface Go) et par l'agrandissement de la page
+// (zoom du début du fichier, x1 à x1,5), pour un pixel d'image par pixel d'écran.
 function PhotoVin({wine, h}) {
   const [erreur, setErreur] = useState(false);
+  const [hauteurNette, setHauteurNette] = useState(null);
+  useEffect(() => { setErreur(false); setHauteurNette(null); }, [wine.photo]);
   if (wine.photo && !erreur) {
+    const densite = (window.devicePixelRatio || 1) * (parseFloat(document.documentElement.style.zoom) || 1);
     return <img src={wine.photo} alt={'Bouteille ' + nomVin(wine)} onError={()=>setErreur(true)}
-      style={{height:h, maxWidth:'100%', objectFit:'contain', display:'block'}}/>;
+      onLoad={e => setHauteurNette(Math.floor(e.currentTarget.naturalHeight / densite))}
+      style={{height: hauteurNette ? Math.min(h, hauteurNette) : 'auto', maxHeight:h, width:'auto', maxWidth:'100%',
+        objectFit:'contain', display:'block', visibility: hauteurNette ? 'visible' : 'hidden'}}/>;
   }
   return <Bottle wine={wine} h={h} label={false}/>;
 }
