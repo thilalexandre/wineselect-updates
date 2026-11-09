@@ -531,7 +531,7 @@ function vinsEnStock() {
   const standard = enStock.filter(formatStandard);
   return standard.length >= 3 ? standard : enStock;
 }
-// Contenance en cl : champ contenance ou format du catalogue, sinon libellé de caisse ou nom.
+// Contenance en cl : champ contenance du catalogue, sinon format, sinon libellé de caisse (jamais le nom enrichi). Sans indication : 75 cl.
 // Sans indication : 75 cl. ⚠️ Même règle que contenanceCl() dans profils-reference.js.
 function lireContenance(texte) {
   const t = ' ' + String(texte).toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/(\d),(\d)/g, '$1.$2') + ' ';
@@ -549,10 +549,12 @@ function lireContenance(texte) {
   if (/PICCOLO/.test(t)) return 20;
   return null;
 }
+// Ordre : champ contenance, sinon format, sinon libellé de caisse ; jamais le nom enrichi.
 function contenanceCl(w) {
   if (!w) return 75;
-  if (typeof w.contenance === 'number' && w.contenance > 0) return w.contenance;
-  for (const t of [w.contenance, w.format, w.libelleCaisse, w.name, w.cuvee]) {
+  const champ = typeof w.contenance === 'number' ? w.contenance : parseFloat(String(w.contenance || '').replace(',', '.'));
+  if (champ > 0) return champ;
+  for (const t of [w.format, w.libelleCaisse]) {
     if (typeof t !== 'string' || !t.trim()) continue;
     const c = lireContenance(t);
     if (c) return c;

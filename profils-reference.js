@@ -409,10 +409,14 @@ function lireContenance(texte) {
   if (/PICCOLO/.test(t)) return 20;
   return null;
 }
+// Ordre : champ « contenance » du catalogue (calculé par calculer-contenances.js à
+// partir des libellés d'origine du magasin), sinon champ « format », sinon libellé
+// de caisse. Jamais le nom enrichi : l'IA y retire souvent le format (9 nov. 2026).
 function contenanceCl(w) {
   if (!w) return 75;
-  if (typeof w.contenance === 'number' && w.contenance > 0) return w.contenance;
-  for (const t of [w.contenance, w.format, w.libelleCaisse, w.name, w.cuvee]) {
+  const champ = typeof w.contenance === 'number' ? w.contenance : parseFloat(String(w.contenance || '').replace(',', '.'));
+  if (champ > 0) return champ;
+  for (const t of [w.format, w.libelleCaisse]) {
     if (typeof t !== 'string' || !t.trim()) continue;
     const c = lireContenance(t);
     if (c) return c;
@@ -428,7 +432,7 @@ function libelleFormat(cl) {
 }
 
 module.exports = {
-  contenanceCl, formatStandard, libelleFormat,
+  contenanceCl, formatStandard, libelleFormat, lireContenance,
   profilerVin, AXES, LIBELLES, libelle, valeurDepuisLibelle, listeLibelles,
   APPELLATIONS, CEPAGES_ROUGE, CEPAGES_BLANC,
 };
