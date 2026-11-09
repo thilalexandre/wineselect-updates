@@ -236,14 +236,63 @@ function vinsEnStock(catalogue) {
   return dispo.length >= 3 ? dispo : tous;
 }
 
+// ── Format des bouteilles (règle du 9 nov. 2026) ────────────────────────────
+// Sélection guidée et vin surprise : bouteilles de 75 cl uniquement. Chat : un autre
+// format seulement si le client le demande explicitement (« demi-bouteille », « magnum »,
+// « 37,5 cl »…). « Une petite bouteille » ou « une grande bouteille » ne comptent pas :
+// en français courant, c'est un jugement sur le vin, pas un format.
+const { contenanceCl, formatStandard, libelleFormat } = require('./profils-reference.js');
+function formatDemande(messages) {
+  const txt = (Array.isArray(messages) ? messages : [])
+    .filter(m => m && m.role === 'user' && typeof m.content === 'string')
+    .map(m => m.content).join(' \n ').toLowerCase().replace(/(\d),(\d)/g, '$1.$2');
+  if (!txt) return null;
+  const petit = /demi[- ]?bouteilles?|petits? formats?|fillettes?|piccolos?|mignonnettes?|(?<![\d.])(37\.5|50|25|20|18\.7|10)\s*cl\b|\bune demi\b(?![- ]?sec)/.test(txt);
+  const grand = /magnums?|j[ée]roboams?|grands? formats?|(?<![\d.])1\.5\s*l\b|(?<![\d.])1\.5\s*litres?|\b(un|1)\s*litres?\b|(?<![\d.])1\s*l\b/.test(txt);
+  if (!petit && !grand) return null;
+  return { petit, grand, libelle: petit && grand ? 'un format autre que 75 cl' : petit ? 'un petit format (demi-bouteille ou moins)' : 'un grand format (magnum, litre)' };
+}
+const formatVoulu = (demande, w) => {
+  const cl = contenanceCl(w);
+  return (demande.petit && cl < 60) || (demande.grand && cl > 76);   // le clavelin (62 cl) n'est pas un petit format
+};
+// Vins proposables : en stock, en 75 cl ; avec une demande de format, ceux de ce format
+// (complétés par des 75 cl s'il y en a moins de 3, pour toujours proposer 3 vins).
+function vinsProposables(catalogue, demande) {
+  const stock = vinsEnStock(catalogue);
+  const standard = stock.filter(formatStandard);
+  const base = standard.length >= 3 ? standard : stock;
+  if (!demande) return base;
+  const voulus = stock.filter(w => formatVoulu(demande, w));
+  return voulus.length >= 3 ? voulus : voulus.concat(base.filter(w => !voulus.includes(w)));
+}
+// Sélection guidée : le seul format demandable est celui du chat hors connexion
+// (serveur.js, chatHorsLigne), qui la réutilise. L'écran n'en envoie jamais.
+const formatDuCorps = f => f === 'petit' ? { petit: true, grand: false } : f === 'grand' ? { petit: false, grand: true } : null;
+
+// Consigne de format ajoutée au prompt du chat
+function consigneFormat(demande, vins) {
+  if (!demande) {
+    return '\nFORMAT : propose uniquement des bouteilles de 75 cl. Jamais de demi-bouteille, de petit format ni de magnum, ' +
+      'sauf si le client le demande explicitement.';
+  }
+  const autres = vins.filter(w => formatVoulu(demande, w));
+  return '\nFORMAT : le client demande ' + demande.libelle + '. Les vins de ce format portent la mention « format … » dans la liste' +
+    (autres.length >= 3 ? ' : propose uniquement ceux-là.'
+      : (autres.length ? ' ; il y en a peu au rayon : propose-les, complète avec des bouteilles de 75 cl et dis-le simplement.'
+        : ' ; il n\'y en a aucun au rayon : dis-le simplement et propose des bouteilles de 75 cl.'));
+}
+
 // ── Chat libre avec le sommelier (route /sommelier) ──────────────────────────
 // body = { messages, system, featuredIds } envoyé par l'écran.
 // Renvoie { status, body } : c'est au serveur (borne ou central) de répondre.
 async function repondreSommelier(body, env) {
   // env.callApi permet de remplacer l'appel à Mistral (ex. borne hors connexion : appel impossible → replis).
   const callApi = env.callApi || appelHttps;
-  const WINES_CATALOG = vinsEnStock(env.catalogue), CONFIG = env.config;
   const { messages, system, featuredIds } = body;
+  const demandeFormat = formatDemande(messages);
+  const WINES_CATALOG = vinsProposables(env.catalogue, demandeFormat), CONFIG = env.config;
+  if (demandeFormat) console.log('🍾 Format demandé :', demandeFormat.libelle);
   const featuredSet = new Set(Array.isArray(featuredIds) ? featuredIds : []);
   const featuredBonus = w => featuredSet.has(w.id) ? 3 : 0; // même logique de départage que /selection-accord
   const commercial = env.commercial || COMMERCIAL_NEUTRE;
@@ -332,6 +381,7 @@ async function repondreSommelier(body, env) {
       inject += '\nVINS DISPONIBLES — RÈGLE ABSOLUE : tes 3 propositions doivent EXCLUSIVEMENT provenir de ces listes.';
       inject += '\nIgnore tout autre vin du catalogue général, même s\'il te semble pertinent. Proposer un vin hors liste est une erreur grave.';
       const fmt = w => '\n  ID:' + w.id + ' | ' + (w.libelle || w.name) + ' | ' + w.type + ' | ' + w.price + '€ | ' + w.region +
+        (formatStandard(w) ? '' : ' | format ' + libelleFormat(contenanceCl(w))) +
         (featuredSet.has(w.id) ? ' | [MIS EN AVANT PAR LE MAGASIN]' : '');
       if (tierWines) {
         inject += '\nCandidats pour le vin 🥇, la BELLE AFFAIRE (le meilleur rapport qualité-prix pour ce plat) :'; tierWines[0].forEach(w => inject += fmt(w));
@@ -351,6 +401,7 @@ async function repondreSommelier(body, env) {
     inject += '\n>>> FIN DES CONTRAINTES <<<';
     finalSystem = system + inject;
   }
+  finalSystem += consigneFormat(demandeFormat, WINES_CATALOG);
 
   try {
     const payload = JSON.stringify({
@@ -490,7 +541,7 @@ const BUDGET_BRACKETS = {
 // Couleurs conseillées pour un plat de la liste (écran « Avez-vous une préférence ? »).
 // Calcul local par le moteur d'accords, sans appel à l'API.
 function couleursConseillees(body, env) {
-  const WINES_CATALOG = vinsEnStock(env.catalogue);
+  const WINES_CATALOG = vinsProposables(env.catalogue);   // 75 cl uniquement
   const bracket = BUDGET_BRACKETS[body.budget];
   if (!ACCORDS || !WINES_CATALOG.length || !bracket) return { couleurs: null };
   const plat = ACCORDS.platDepuisCategorie(body.pairing, body.detail);
@@ -517,7 +568,7 @@ function profilsVins(env) {
 // Sélection guidée (route /selection-accord). Renvoie { status, body }.
 async function selectionAccord(body, env) {
   const callApi = env.callApi || appelHttps;
-  const WINES_CATALOG = vinsEnStock(env.catalogue), CONFIG = env.config;
+  const WINES_CATALOG = vinsProposables(env.catalogue, formatDuCorps(body.format)), CONFIG = env.config;   // 75 cl, sauf chat hors connexion
   const { type, budget, pairing, detail, featuredIds } = body;
   const featuredSet = new Set(Array.isArray(featuredIds) ? featuredIds : []);
 
@@ -741,6 +792,8 @@ module.exports = {
   libelleVin,
   avecLibelles,
   vinsEnStock,
+  vinsProposables,
+  formatDemande,
   repondreSommelier,
   selectionAccord,
   couleursConseillees,

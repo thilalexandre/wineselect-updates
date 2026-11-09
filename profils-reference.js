@@ -384,7 +384,51 @@ function valeurDepuisLibelle(type, axe, texte) {
   return isNaN(n) ? null : n;
 }
 
+// ── Format de la bouteille (contenance en cl) ────────────────────────────────
+// Règle produit (9 nov. 2026) : la sélection guidée et le vin surprise ne proposent
+// que des bouteilles de 75 cl ; le chat, un autre format seulement si le client le
+// demande. Contenance lue dans un champ du catalogue (contenance, format), sinon
+// dans le libellé de caisse ou le nom (37,5 cl, 50 cl, 25 cl, 18,7 cl, 1,5 L,
+// Magnum…). Sans indication : 75 cl.
+// ⚠️ Même règle que contenanceCl() dans WineSelect.html : les deux doivent rester identiques.
+function lireContenance(texte) {
+  const t = ' ' + String(texte).toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/(\d),(\d)/g, '$1.$2') + ' ';
+  const garder = v => (v >= 5 && v <= 600 ? v : null);
+  // Un nombre n'est jamais pris au milieu d'un autre (« 37.5 ») ; un point d'abréviation
+  // juste avant reste permis (« TOURANG.25CL »).
+  let m = t.match(/(?<!\d)(?<!\d\.)(\d{1,3}(?:\.\d{1,2})?)\s*CL/);      // 75CL, 37.5 CL, « 37,5CLMALBEC »
+  if (!m) m = t.match(/(?<!\d)(?<!\d\.)(\d{1,2}\.\d{1,2})\s*C(?![A-Z])/); // « 37,5C BUZET »
+  if (m) return garder(parseFloat(m[1]));
+  m = t.match(/(?<!\d)(?<!\d\.)(\d{2,4})\s*ML(?![A-Z])/);
+  if (m) return garder(parseFloat(m[1]) / 10);
+  m = t.match(/(?<![\d.A-Z])(\d(?:\.\d{1,2})?)\s*(?:L|LITRES?)(?![A-Z'])/); // 1,5L, 1 L, 0.75L
+  if (m) return garder(Math.round(parseFloat(m[1]) * 1000) / 10);
+  if (/MAGNUM/.test(t)) return 150;
+  if (/JEROBOAM/.test(t)) return 300;
+  if (/DEMI[- ]?BOUTEILLE|FILLETTE/.test(t)) return 37.5;
+  if (/PICCOLO/.test(t)) return 20;
+  return null;
+}
+function contenanceCl(w) {
+  if (!w) return 75;
+  if (typeof w.contenance === 'number' && w.contenance > 0) return w.contenance;
+  for (const t of [w.contenance, w.format, w.libelleCaisse, w.name, w.cuvee]) {
+    if (typeof t !== 'string' || !t.trim()) continue;
+    const c = lireContenance(t);
+    if (c) return c;
+  }
+  return 75;
+}
+// Bouteille normale : 75 cl, ou clavelin du Jura (62 cl, seul format du vin jaune)
+const formatStandard = w => { const cl = contenanceCl(w); return Math.abs(cl - 75) < 1 || Math.abs(cl - 62) < 1; };
+// Libellé d'un format pour le client : « 37,5 cl », « Magnum (1,5 L) »
+function libelleFormat(cl) {
+  if (cl === 150) return 'Magnum (1,5 L)';
+  return cl >= 100 ? String(cl / 100).replace('.', ',') + ' L' : String(cl).replace('.', ',') + ' cl';
+}
+
 module.exports = {
+  contenanceCl, formatStandard, libelleFormat,
   profilerVin, AXES, LIBELLES, libelle, valeurDepuisLibelle, listeLibelles,
   APPELLATIONS, CEPAGES_ROUGE, CEPAGES_BLANC,
 };

@@ -18,7 +18,7 @@
 //  de wines-data.js, calculé à la volée s'il est absent).
 // ═══════════════════════════════════════════════════════════════════════════
 
-const { profilerVin, libelle } = require('./profils-reference.js');
+const { profilerVin, libelle, contenanceCl, formatStandard, libelleFormat } = require('./profils-reference.js');
 
 const REGLAGES = {
   seuilCompatible: 65,     // note minimale pour être proposé
@@ -522,6 +522,7 @@ function construireCandidats(wines, d, budget, featuredSet, texteClient, aleatoi
 function ligneCandidat(w, note, featuredSet, decouverte, belle) {
   const raisons = note ? note.plus.slice(0, 3).join(' ; ') : '';
   return '\n  ID:' + w.id + ' | ' + (w.libelle || w.name) + ' | ' + w.type + ' | ' + w.price + '€ | ' + (w.region || '') +
+    (formatStandard(w) ? '' : ' | format ' + libelleFormat(contenanceCl(w))) +
     ' | profil : ' + decrireProfil(w) +
     (note ? ' | accord ' + Math.min(100, note.score) + '/100' + (raisons ? ' : ' + raisons : '') : '') +
     (featuredSet && featuredSet.has(w.id) ? ' | [MIS EN AVANT PAR LE MAGASIN]' : '') +

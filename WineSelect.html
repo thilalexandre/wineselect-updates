@@ -39,7 +39,8 @@ const WINES = window.WINES_DATA;
 // du catalogue ne la fournit pas (sinon l'application ne démarre pas).
 // Catalogue envoyé au sommelier : champs objectifs seulement (une ancienne note /100 du
 // catalogue du magasin n'est jamais transmise)
-const CATALOG = (window.CATALOG_DATA || WINES || []).map(w => ({id:w.id, name:w.name, type:w.type, price:w.price, region:w.region, grape:w.grape, pairings:w.pairings}));
+// Bouteilles de 75 cl seulement (règle des formats, voir vinsEnStock)
+const CATALOG = (window.CATALOG_DATA || WINES || []).filter(w => formatStandard((WINES || []).find(x => x.id === w.id) || w)).map(w => ({id:w.id, name:w.name, type:w.type, price:w.price, region:w.region, grape:w.grape, pairings:w.pairings}));
 // Fiche produit enrichie (facultative) : domaine, cuvée, millésime, photo de la
 // bouteille et emplacement en rayon. Viennent de wines-data.js ou de l'import
 // CSV de l'admin. Si un champ manque, l'affichage retombe sur l'existant.
@@ -521,10 +522,45 @@ function noteGoutLocale(w, gout) {
 
 // Vins proposables : stock à 0 écarté (stock non renseigné = proposable). Moins de 3
 // vins en stock : on garde tout le rayon, pour toujours proposer 3 vins.
+// Format : vin surprise, sélection guidée et leurs replis ne proposent que des bouteilles
+// de 75 cl (règle du 9 nov. 2026). Les autres formats restent au catalogue : seul le chat
+// les propose, et seulement si le client les demande (géré par le serveur).
 function vinsEnStock() {
   const dispo = WINES.filter(w => typeof w.stock !== 'number' || w.stock > 0);
-  return dispo.length >= 3 ? dispo : WINES;
+  const enStock = dispo.length >= 3 ? dispo : WINES;
+  const standard = enStock.filter(formatStandard);
+  return standard.length >= 3 ? standard : enStock;
 }
+// Contenance en cl : champ contenance ou format du catalogue, sinon libellé de caisse ou nom.
+// Sans indication : 75 cl. ⚠️ Même règle que contenanceCl() dans profils-reference.js.
+function lireContenance(texte) {
+  const t = ' ' + String(texte).toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/(\d),(\d)/g, '$1.$2') + ' ';
+  const garder = v => (v >= 5 && v <= 600 ? v : null);
+  let m = t.match(/(?<!\d)(?<!\d\.)(\d{1,3}(?:\.\d{1,2})?)\s*CL/);
+  if (!m) m = t.match(/(?<!\d)(?<!\d\.)(\d{1,2}\.\d{1,2})\s*C(?![A-Z])/);
+  if (m) return garder(parseFloat(m[1]));
+  m = t.match(/(?<!\d)(?<!\d\.)(\d{2,4})\s*ML(?![A-Z])/);
+  if (m) return garder(parseFloat(m[1]) / 10);
+  m = t.match(/(?<![\d.A-Z])(\d(?:\.\d{1,2})?)\s*(?:L|LITRES?)(?![A-Z'])/);
+  if (m) return garder(Math.round(parseFloat(m[1]) * 1000) / 10);
+  if (/MAGNUM/.test(t)) return 150;
+  if (/JEROBOAM/.test(t)) return 300;
+  if (/DEMI[- ]?BOUTEILLE|FILLETTE/.test(t)) return 37.5;
+  if (/PICCOLO/.test(t)) return 20;
+  return null;
+}
+function contenanceCl(w) {
+  if (!w) return 75;
+  if (typeof w.contenance === 'number' && w.contenance > 0) return w.contenance;
+  for (const t of [w.contenance, w.format, w.libelleCaisse, w.name, w.cuvee]) {
+    if (typeof t !== 'string' || !t.trim()) continue;
+    const c = lireContenance(t);
+    if (c) return c;
+  }
+  return 75;
+}
+// Bouteille normale : 75 cl, ou clavelin du Jura (62 cl, seul format du vin jaune)
+function formatStandard(w) { const cl = contenanceCl(w); return Math.abs(cl - 75) < 1 || Math.abs(cl - 62) < 1; }
 
 function filterWines(type, budget, pairing) {
   let results = vinsEnStock().filter(w =>

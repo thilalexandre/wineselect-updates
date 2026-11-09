@@ -556,6 +556,9 @@ async function chatHorsLigne(messages) {
     : plat === 'apéritif' ? { occasion: 'aperitif', budget: tranche, fourchette, couleur }
     : plat ? { occasion: 'repas', pairing: plat, budget: tranche, fourchette, couleur }
     : { occasion: 'offrir', gout: 'inconnu', budget: tranche, fourchette, couleur };
+  // Format autre que 75 cl seulement s'il est demandé (« demi-bouteille », « magnum »…)
+  const fmt = SOMMELIER.formatDemande ? SOMMELIER.formatDemande(duClient) : null;
+  if (fmt) demande.format = fmt.petit && !fmt.grand ? 'petit' : fmt.grand && !fmt.petit ? 'grand' : undefined;
   const r = await SOMMELIER.selectionAccord(demande, envSommelier());
   const vins = ((r.body && r.body.ids) || []).map(id => WINES_CATALOG.find(w => w.id === id)).filter(Boolean)
     .sort((a, b) => a.price - b.price);
