@@ -89,10 +89,12 @@ CATALOG.forEach(c => { const w = WINES.find(x => x.id === c.id); if (w) c.name =
 // Photo de la bouteille si elle existe (chemin du type photos/123.jpg, relatif au
 // dossier de la borne, ou adresse web). Sinon, ou si l'image ne charge pas,
 // l'illustration dessinée habituelle.
-// Jamais agrandie au-delà de sa taille réelle (mieux vaut une petite image nette
-// qu'une grande floue) : hauteur au plus h, et au plus sa hauteur en pixels divisée
-// par la densité de l'écran (1,5 sur la Surface Go) et par l'agrandissement de la page
-// (zoom du début du fichier, x1 à x1,5), pour un pixel d'image par pixel d'écran.
+// Agrandie au plus deux fois sa taille réelle (9 nov. 2026 : à un pixel d'image par
+// pixel d'écran, les photos du Monoprix, 245 px de haut, étaient trop petites pour
+// reconnaître la bouteille en rayon ; x2 reste lisible) : hauteur au plus h, et au
+// plus deux fois sa hauteur en pixels divisée par la densité de l'écran (1,5 sur la
+// Surface Go) et par l'agrandissement de la page (zoom du début du fichier, x1 à x1,5).
+const AGRANDISSEMENT_PHOTO_MAX = 2;
 function PhotoVin({wine, h}) {
   const [erreur, setErreur] = useState(false);
   const [hauteurNette, setHauteurNette] = useState(null);
@@ -100,7 +102,7 @@ function PhotoVin({wine, h}) {
   if (wine.photo && !erreur) {
     const densite = (window.devicePixelRatio || 1) * (parseFloat(document.documentElement.style.zoom) || 1);
     return <img src={wine.photo} alt={'Bouteille ' + nomVin(wine)} onError={()=>setErreur(true)}
-      onLoad={e => setHauteurNette(Math.floor(e.currentTarget.naturalHeight / densite))}
+      onLoad={e => setHauteurNette(Math.floor(e.currentTarget.naturalHeight * AGRANDISSEMENT_PHOTO_MAX / densite))}
       style={{height: hauteurNette ? Math.min(h, hauteurNette) : 'auto', maxHeight:h, width:'auto', maxWidth:'100%',
         objectFit:'contain', display:'block', visibility: hauteurNette ? 'visible' : 'hidden'}}/>;
   }
@@ -252,6 +254,26 @@ const ROLE_LABELS = {
   decouverte:    'Découverte',
 };
 const DEFAULT_ROLE_ORDER = ['valeur_sure','coup_de_coeur','decouverte']; // dernier recours si aucun rôle n'est dispo
+
+// Couleur du vin, repérable d'un coup d'œil sur les résultats : cadre de la carte,
+// fond de la photo et pastille écrite (la couleur n'est jamais le seul indice).
+const COULEURS_VIN = {
+  'rouge':  {teinte:'#8e1f32', fond:'#f7e8ea', libelle:'Rouge'},
+  'blanc':  {teinte:'#c9a227', fond:'#fbf4dc', libelle:'Blanc'},
+  'rosé':   {teinte:'#e07f91', fond:'#fcecef', libelle:'Rosé'},
+  'bulles': {teinte:'#9c8a5c', fond:'#f3efe3', libelle:'Effervescent'},
+};
+const couleurVin = w => COULEURS_VIN[w && w.type] || null;
+function PastilleCouleur({wine, petit}) {
+  const c = couleurVin(wine);
+  if (!c) return null;
+  return (
+    <span style={{display:'inline-flex', alignItems:'center', gap:7, alignSelf:'flex-start', padding:petit?'3px 10px':'5px 12px', borderRadius:999, background:c.fond, border:'1px solid ' + c.teinte, color:'#2a1215', fontFamily:'Montserrat,sans-serif', fontSize:petit?10:11, fontWeight:600, letterSpacing:'.14em', textTransform:'uppercase', lineHeight:1.2}}>
+      <span style={{width:petit?9:11, height:petit?9:11, borderRadius:'50%', background:c.teinte, flexShrink:0}}/>
+      {c.libelle}
+    </span>
+  );
+}
 
 // Mise en avant "sélection" côté magasin — un choix commercial assumé, distinct de
 // l'accord calculé : le gérant décide, avec une raison affichée pour rester
@@ -987,8 +1009,9 @@ function WineModal({wine, onClose}) {
     <div style={{position:'fixed', inset:0, background:'rgba(42,18,21,.45)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:300, padding:16, backdropFilter:'blur(3px)'}} onClick={onClose}>
       <div style={{...sans, background:I.cream, borderRadius:24, border:'1px solid ' + I.bord, padding:'30px 28px 26px', maxWidth:440, width:'100%', maxHeight:'calc(var(--ecran, 100vh) * .88)', overflowY:'auto', boxShadow:'0 30px 70px rgba(42,18,21,.22)'}} onClick={e=>e.stopPropagation()}>
         <div style={{textAlign:'center'}}>
-          <div style={{display:'flex', justifyContent:'center', marginBottom:14}}><PhotoVin wine={wine} h={wine.photo ? 180 : 140}/></div>
-          {wine.accord && <div style={capsIv(10, I.gold, {letterSpacing:'.2em', fontWeight:600, marginBottom:8})}>{wine.accord}</div>}
+          <div style={{display:'flex', justifyContent:'center', marginBottom:14}}><PhotoVin wine={wine} h={wine.photo ? 280 : 140}/></div>
+          <div style={{display:'flex', justifyContent:'center', marginBottom:10}}><PastilleCouleur wine={wine}/></div>
+          {wine.accord &&<div style={capsIv(10, I.gold, {letterSpacing:'.2em', fontWeight:600, marginBottom:8})}>{wine.accord}</div>}
           {surtitreVin(wine) && <div style={capsIv(11, I.muted, {letterSpacing:'.16em', marginBottom:4})}>{surtitreVin(wine)}</div>}
           <div style={{...serif, fontSize:30, color:I.ink, fontWeight:500, lineHeight:1.1}}>{nomVin(wine)}</div>
           <div style={{fontSize:14, color:I.muted, marginTop:6, lineHeight:1.5}}>{detailsVin(wine)}</div>
@@ -1680,14 +1703,17 @@ function Results({results, setView}) {
         </div>
 
         {/* Vin principal */}
-        <div onClick={()=>ouvrir(hero)} style={{marginTop:26, display:'flex', gap:24, padding:24, background:IV.surface, border:'1px solid '+IV.line, borderRadius:20, boxShadow:'0 18px 40px rgba(94,22,34,.08)', cursor:'pointer'}}>
-          <div style={{flexShrink:0, width:140, minHeight:280, borderRadius:12, background:IV.soft, display:'flex', alignItems:'center', justifyContent:'center'}}>
-            <PhotoVin wine={hero} h={240}/>
+        <div onClick={()=>ouvrir(hero)} style={{marginTop:26, display:'flex', gap:24, padding:24, background:IV.surface, border:'3px solid '+((couleurVin(hero)||{}).teinte||IV.line), borderRadius:20, boxShadow:'0 18px 40px rgba(94,22,34,.08)', cursor:'pointer'}}>
+          <div style={{flexShrink:0, width:150, minHeight:330, borderRadius:12, background:(couleurVin(hero)||{}).fond||IV.soft, display:'flex', alignItems:'center', justifyContent:'center'}}>
+            <PhotoVin wine={hero} h={310}/>
           </div>
           <div style={{flex:1, minWidth:0, display:'flex', flexDirection:'column', gap:12}}>
-            <div style={{display:'flex', alignItems:'center', gap:9, ...caps(11, IV.wine, {fontWeight:600, letterSpacing:'.2em'})}}>
-              <span style={{width:7, height:7, background:IV.wine, transform:'rotate(45deg)'}}/>
-              {labelFor(hero, heroIdx)}
+            <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', gap:10, flexWrap:'wrap'}}>
+              <div style={{display:'flex', alignItems:'center', gap:9, ...caps(11, IV.wine, {fontWeight:600, letterSpacing:'.2em'})}}>
+                <span style={{width:7, height:7, background:IV.wine, transform:'rotate(45deg)'}}/>
+                {labelFor(hero, heroIdx)}
+              </div>
+              <PastilleCouleur wine={hero}/>
             </div>
             <div>
               {surtitreVin(hero) && <div style={caps(12, IV.gold, {fontWeight:600, letterSpacing:'.16em', marginBottom:6})}>{surtitreVin(hero)}</div>}
@@ -1710,10 +1736,13 @@ function Results({results, setView}) {
         {autres.length>0 && (
           <div style={{marginTop:16, display:'grid', gridTemplateColumns:autres.length>1?'repeat(2, minmax(0, 1fr))':'1fr', gap:16}}>
             {autres.map(({w,i})=>(
-              <div key={w.id} onClick={()=>ouvrir(w)} style={{display:'flex', flexDirection:'column', gap:10, padding:20, background:IV.surface, border:'1px solid '+IV.line, borderRadius:16, cursor:'pointer'}}>
-                <div style={caps(10, IV.gold, {fontWeight:600, letterSpacing:'.2em'})}>{labelFor(w,i)}</div>
-                <div style={{height:150, borderRadius:10, background:IV.soft, display:'flex', alignItems:'center', justifyContent:'center'}}>
-                  <PhotoVin wine={w} h={130}/>
+              <div key={w.id} onClick={()=>ouvrir(w)} style={{display:'flex', flexDirection:'column', gap:10, padding:20, background:IV.surface, border:'3px solid '+((couleurVin(w)||{}).teinte||IV.line), borderRadius:16, cursor:'pointer'}}>
+                <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', gap:8, flexWrap:'wrap'}}>
+                  <div style={caps(10, IV.gold, {fontWeight:600, letterSpacing:'.2em'})}>{labelFor(w,i)}</div>
+                  <PastilleCouleur wine={w} petit={true}/>
+                </div>
+                <div style={{height:220, borderRadius:10, background:(couleurVin(w)||{}).fond||IV.soft, display:'flex', alignItems:'center', justifyContent:'center'}}>
+                  <PhotoVin wine={w} h={200}/>
                 </div>
                 <div>
                   {surtitreVin(w) && <div style={caps(10, IV.gold, {fontWeight:600, letterSpacing:'.14em', marginBottom:5})}>{surtitreVin(w)}</div>}
@@ -1860,11 +1889,14 @@ function Chat({setView}) {
               {m.wines && m.wines.length>0 && (
                 <div style={{width:'100%', marginTop:12, display:'flex', flexDirection:'column', gap:10}}>
                   {m.wines.map((w,wi)=>(
-                    <div key={w.id} style={{background:I.cream, border:'1px solid ' + I.bord, borderRadius:18, overflow:'hidden'}}>
+                    <div key={w.id} style={{background:I.cream, border:'3px solid ' + ((couleurVin(w)||{}).teinte||I.bord), borderRadius:18, overflow:'hidden'}}>
                       <div onClick={()=>{ setModal(w); noterUsage('fiche', {mode:'chat', vin:w.id}); }} style={{display:'flex', gap:16, alignItems:'center', padding:'16px 18px', cursor:'pointer'}}>
-                        <div style={{width:56, flexShrink:0, display:'flex', justifyContent:'center'}}><PhotoVin wine={w} h={78}/></div>
+                        <div style={{width:64, minHeight:120, flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center', borderRadius:10, background:(couleurVin(w)||{}).fond||I.bg}}><PhotoVin wine={w} h={110}/></div>
                         <div style={{flex:1, minWidth:0}}>
-                          <div style={capsIv(10, I.gold, {letterSpacing:'.18em', fontWeight:600, marginBottom:5})}>{labels[wi]||''}</div>
+                          <div style={{display:'flex', alignItems:'center', gap:10, flexWrap:'wrap', marginBottom:5}}>
+                            <div style={capsIv(10, I.gold, {letterSpacing:'.18em', fontWeight:600})}>{labels[wi]||''}</div>
+                            <PastilleCouleur wine={w} petit={true}/>
+                          </div>
                           {surtitreVin(w) && <div style={capsIv(10, I.muted, {letterSpacing:'.14em', marginBottom:2})}>{surtitreVin(w)}</div>}
                           <div style={{...serif, fontSize:22, fontWeight:600, color:I.ink, lineHeight:1.15}}>{nomVin(w)}{w.millesime && !detailsVin(w).includes(String(w.millesime)) ? ' ' + w.millesime : ''}</div>
                           <div style={{...sans, fontSize:13, color:I.muted, marginTop:4, lineHeight:1.5}}>{detailsVin(w)}</div>

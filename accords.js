@@ -535,6 +535,10 @@ function ligneCandidat(w, note, featuredSet, decouverte, belle) {
 // demande parmi les vins de la moitié basse de la fourchette, à condition que cet
 // accord soit au moins « Très bon » (75). À accord égal, le moins cher.
 const BELLE_AFFAIRE_ACCORD_MIN = 75;
+
+// Raison du parcours guidé qui ne dit rien d'utile au client, ou qui affirme une
+// rareté sans fondement (« origine originale », « Pouilly-Fumé, original pour la Loire »).
+const RAISON_CREUSE = /\boriginal(e|es|ité)?\b|\borigine\b|atypique|\brares?\b|méconnu|peu connu|insolite|surprenant|inattendu|inhabituel|hors des sentiers/i;
 function choisirBelleAffaire(notesList, min, max) {
   const haut = min + (max - min) * 0.5;
   const bas = notesList.filter(n => n.wine.price >= min * 0.95 && n.wine.price <= haut && n.score >= BELLE_AFFAIRE_ACCORD_MIN);
@@ -1316,14 +1320,16 @@ async function selectionGuidee(body, bracket, featuredSet, res, env) {
     fallbackRoles[byScore[1].id] = 'valeur_sure';
     fallbackRoles[byScore[2].id] = 'decouverte';
   }
-  const fallbackReasons = {};
-  fallbackWines.forEach(w => {
-    const n = c.notes.get(w.id);
-    // La raison la plus parlante : on évite les raisons génériques (corps, intensité) si mieux existe
+  // Raison écrite par le moteur d'accords (sans IA) : la plus parlante, en évitant
+  // les raisons génériques (corps, intensité) si mieux existe
+  const raisonMoteur = id => {
+    const n = c.notes.get(id);
     const generiques = ['corps à la hauteur du plat', 'corps proche du plat', 'même intensité que le plat'];
     const r = n && (n.plus.find(x => !generiques.includes(x)) || n.plus[0]);
-    if (r) fallbackReasons[w.id] = r.charAt(0).toUpperCase() + r.slice(1);
-  });
+    return r ? r.charAt(0).toUpperCase() + r.slice(1) : null;
+  };
+  const fallbackReasons = {};
+  fallbackWines.forEach(w => { const r = raisonMoteur(w.id); if (r) fallbackReasons[w.id] = r; });
   // Libellé de pertinence de chaque vin proposé (voir niveauAccord)
   const niveaux = ids => {
     const out = {};
@@ -1346,13 +1352,16 @@ async function selectionGuidee(body, bracket, featuredSet, res, env) {
     'Attribue à CHAQUE vin un rôle, chacun utilisé UNE SEULE fois :\n' +
     '  - "valeur_sure" : vin fiable, typique, bon rapport qualité-prix, le choix sans surprise.\n' +
     '  - "coup_de_coeur" : le meilleur accord, ou le plus séduisant.\n' +
-    '  - "decouverte" : le plus original (cépage rare, région moins connue, style inattendu), quel que soit son prix.' +
+    '  - "decouverte" : parmi les trois, celui qui change le plus des deux autres (autre cépage, autre région ou autre style), quel que soit son prix. Ce rôle ne dit rien de la rareté du vin.' +
     (c.decouverte ? ' Le vin marqué [DÉCOUVERTE] est d\'une autre couleur que celle qu\'on attendrait, avec un excellent accord : ' +
       'tu peux le retenir pour ce rôle, sans obligation.' : '') + '\n' +
     (occasion !== 'cuisiner' ? 'Varie les prix dans la tranche : idéalement un vin au cœur de la tranche, un dans le haut de la tranche, et une belle affaire' +
       (c.belle ? ' (le vin marqué [BELLE AFFAIRE] : le meilleur accord à prix doux, qui fait souvent une bonne "valeur_sure")' : ' (un excellent accord à prix doux)') +
       ', sans jamais sacrifier l\'accord pour autant.\n' : '') +
-    'Pour chaque vin, une raison courte (12 mots maximum), en français simple, sans jamais parler de note ni de score.\n' +
+    'Pour chaque vin, une raison courte (12 mots maximum), en français simple, sans jamais parler de note ni de score. ' +
+    'Elle dit concrètement pourquoi CE vin convient à la demande (accord avec le plat, arômes, fraîcheur, tanins, corps, cépage), ' +
+    'jamais pourquoi il a son rôle (le rôle est affiché à part). N\'emploie jamais « original », « originale », « atypique », « rare », ' +
+    '« méconnu », « insolite », « surprenant » ni « inattendu », et ne présente jamais une appellation classique (Pouilly-Fumé, Sancerre, Chablis…) comme inhabituelle.\n' +
     (occasion === 'cuisiner'
       ? 'Dans "message", une phrase courte et utile sur la cuisson (par exemple : ce vin pourra aussi accompagner le plat à table).\n'
       : 'Laisse "message" vide, sauf information importante pour le client.\n') +
@@ -1419,7 +1428,17 @@ async function selectionGuidee(body, bracket, featuredSet, res, env) {
         return w ? w.name : '';
       }).replace(/\s{2,}/g, ' ').replace(/\s+([,.])/g, '$1').trim();
     const reasons = {};
-    Object.keys(parsed.reasons || {}).forEach(k => { reasons[k] = sansIds(parsed.reasons[k]); });
+    // Raison creuse ou fausse (« origine originale », « Pouilly-Fumé, original pour la Loire ») :
+    // remplacée par celle du moteur d'accords, sinon retirée (l'écran affiche alors les notes de dégustation).
+    // Seul le texte change, jamais le vin choisi.
+    Object.keys(parsed.reasons || {}).forEach(k => {
+      let t = sansIds(parsed.reasons[k]);
+      t = t.charAt(0).toUpperCase() + t.slice(1);   // l'IA commence parfois par une minuscule
+      if (!RAISON_CREUSE.test(t)) { reasons[k] = t; return; }
+      const r = raisonMoteur(Number(k));
+      console.warn('⚠️  Raison creuse remplacée (' + k + ') : « ' + t + ' »' + (r ? ' → « ' + r + ' »' : ''));
+      if (r) reasons[k] = r;
+    });
     let message = (typeof parsed.message === 'string' && parsed.message.trim()) ? sansIds(parsed.message).slice(0, 220) : messageInfo;
     // Budget ou douceur : message écrit par le serveur à partir des vrais prix et profils
     // (l'IA s'y trompait : vin sec présenté comme demi-sec, prix « hors budget » qui ne l'était pas).

@@ -685,13 +685,15 @@ async function selectionAccord(body, env) {
     'En plus du choix, attribue à CHAQUE vin un rôle parmi ces 3 (chacun utilisé UNE SEULE fois) :\n' +
     '  - "valeur_sure" : vin fiable, typique de son appellation/cépage, bon rapport qualité-prix — le choix sans surprise.\n' +
     '  - "coup_de_coeur" : le vin qui fait le meilleur accord avec le plat, ou le plus séduisant en intensité/équilibre.\n' +
-    '  - "decouverte" : vin plus atypique — cépage rare, région moins connue, style original — indépendamment de son prix ' +
+    '  - "decouverte" : parmi les trois, celui qui change le plus des deux autres (autre cépage, autre région ou autre style) — ce rôle ne dit rien de la rareté du vin — indépendamment de son prix ' +
     '(une découverte n\'est PAS forcément la plus chère des trois).\n' +
     'Le rôle ne doit PAS être déduit du rang de prix : base-toi sur les caractéristiques réelles du vin (cépage, région, notes de dégustation).\n' +
     'Réponds UNIQUEMENT en JSON, sans aucun texte avant ou après, sous cette forme exacte :\n' +
     '{"ids":[id1,id2,id3],' +
     '"roles":{"id1":"valeur_sure|coup_de_coeur|decouverte","id2":"...","id3":"..."},' +
-    '"reasons":{"id1":"raison courte en français, 12 mots max","id2":"...","id3":"..."}}';
+    '"reasons":{"id1":"raison courte en français, 12 mots max","id2":"...","id3":"..."}}\n' +
+    'Chaque raison dit concrètement pourquoi ce vin convient (accord, arômes, fraîcheur, tanins, corps, cépage), jamais pourquoi il a son rôle. ' +
+    'N\'emploie jamais « original », « atypique », « rare », « méconnu », « insolite » ni « surprenant ».';
 
   const askOnce = async (extra) => {
     const payload = JSON.stringify({
