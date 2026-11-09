@@ -329,7 +329,7 @@ const PAIRING_DETAILS = {
     {id:'bleu', label:'Bleu (roquefort)'},
   ],
 };
-// Menu de Noël : case de « Qu'allez-vous manger ? » affichée du 15 novembre au 6 janvier
+// Menu de Noël : case de « Qu'allez-vous manger ? » affichée du 1er novembre au 6 janvier
 // (date de la tablette). Chaque plat a un profil écrit à la main dans accords.js
 // (PLATS_CATEGORIES['noel/...']), utilisé aussi en mode autonome, sans IA.
 // repli : catégorie voisine, seulement si le serveur de la borne ne répond pas du tout.
@@ -344,7 +344,7 @@ const NOEL_PLATS = [
 function periodeNoel(date) {
   const d = date || new Date();
   const m = d.getMonth() + 1, j = d.getDate();
-  return (m === 11 && j >= 15) || m === 12 || (m === 1 && j <= 6);
+  return m === 11 || m === 12 || (m === 1 && j <= 6);
 }
 // Habillage des cartes : le même pour tous les vins. Il n'y a plus de note de qualité
 // propre à un vin (subjective) : la seule appréciation affichée est l'accord avec la
@@ -1326,7 +1326,7 @@ function Selection({setView, setResults}) {
   const goutsCouleur = typeDabord && GOUTS_PAR_COULEUR[couleur];
   const goutsOrdre = goutsCouleur ? (offrir ? [inconnu].concat(goutsCouleur) : goutsCouleur.concat([inconnu]))
     : offrir ? [inconnu].concat(GOUTS_UI.slice(0,4)) : GOUTS_UI;
-  // Du 15 novembre au 6 janvier, « Menu de Noël » en tête de liste
+  // Du 1er novembre au 6 janvier, « Menu de Noël » en tête de liste
   const platsOpts = (periodeNoel() ? [{id:'noel', label:'Menu de Noël'}] : []).concat(PAIRINGS.filter(p => p.id !== 'apéritif'));
 
   return (

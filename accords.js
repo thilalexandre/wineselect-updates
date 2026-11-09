@@ -578,7 +578,7 @@ const PLATS_CATEGORIES = {
   'méditerranéen':  { plat: 'cuisine méditerranéenne', proteine: 'aucun', sauce: 'tomate', corps: 2, acidite: 2, aromatique: 2, intensite: 2 },
   'asiatique':      { plat: 'cuisine asiatique', proteine: 'volaille', cuisson: 'poele', corps: 2, epice: 1, aromatique: 2, sucre: 1, intensite: 3, affinite_moelleux: true },
   'barbecue':       { plat: 'barbecue, grillades', proteine: 'porc', cuisson: 'grille', corps: 3, gras: 2, intensite: 3 },
-  // Menu de Noël (bouton affiché du 15 novembre au 6 janvier) : profils validés le 9 nov. 2026
+  // Menu de Noël (bouton affiché du 1er novembre au 6 janvier) : profils validés le 9 nov. 2026
   'noel/huitres':   { plat: 'huîtres', proteine: 'fruits de mer', cuisson: 'cru', corps: 1, gras: 0, acidite: 1, iode: 3, intensite: 2, affinite_bulles: true },
   'noel/saumon':    { plat: 'saumon fumé', proteine: 'poisson', cuisson: 'cru', corps: 2, gras: 2, iode: 1, aromatique: 1, intensite: 2, affinite_bulles: true },
   'noel/foiegras':  { plat: 'foie gras', proteine: 'canard', cuisson: 'aucune', corps: 3, gras: 3, intensite: 3, affinite_moelleux: true, affinite_bulles: true },
