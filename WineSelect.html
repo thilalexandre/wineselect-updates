@@ -12,7 +12,7 @@
 <script src="vendor/babel.min.js"></script>
 <script>window.Babel || document.write('<script src="https://unpkg.com/@babel/standalone@7.29.10/babel.min.js"><\/script>');</script>
 <link href="vendor/polices.css" rel="stylesheet">
-<style>*{box-sizing:border-box;margin:0;padding:0}body{background:#faf6ee}</style>
+<style>*{box-sizing:border-box;margin:0;padding:0}html,body{min-height:100%}body{background:#f6eedf}</style>
 <script>
 // Grand écran (tablette, borne) : l'écran, pensé pour la largeur d'un téléphone,
 // est agrandi d'un seul bloc (x1 à x1,5) pour occuper la place disponible.
@@ -106,7 +106,7 @@ function PhotoVin({wine, h}) {
       style={{height: hauteurNette ? Math.min(h, hauteurNette) : 'auto', maxHeight:h, width:'auto', maxWidth:'100%',
         objectFit:'contain', display:'block', visibility: hauteurNette ? 'visible' : 'hidden'}}/>;
   }
-  return <Bottle wine={wine} h={h} label={false}/>;
+  return <Bottle wine={wine} h={h} label={true}/>;
 }
 
 // Emplacement en rayon (ex. « Allée 12 · Étagère 3 »), affiché seulement s'il est renseigné.
@@ -323,6 +323,15 @@ const PAIRINGS=[
   {id:'asiatique',     label:'Asiatique'},
   {id:'barbecue',      label:'Barbecue'},
 ];
+// Photos culinaires des accords et du Menu de Noël (Unsplash, licence libre ; auteurs dans
+// vendor/accords/CREDITS.txt). Servies par la borne : fonctionnent sans Internet.
+const PHOTOS_ACCORDS = {
+  viande:'viande', volaille:'volaille', poisson:'poisson', 'fruits de mer':'fruits-de-mer', fromage:'fromage',
+  charcuterie:'charcuterie', dessert:'dessert', 'méditerranéen':'mediterraneen', asiatique:'asiatique',
+  barbecue:'barbecue', noel:'noel',
+  huitres:'huitres', saumon:'saumon', foiegras:'foiegras', stjacques:'stjacques', chapon:'chapon', buche:'buche',
+};
+const photoAccord = id => PHOTOS_ACCORDS[id] ? 'vendor/accords/' + PHOTOS_ACCORDS[id] + '.webp' : null;
 const PTY = {
   rouge:  ['viande','fromage','charcuterie','barbecue','apéritif','méditerranéen','dessert'],
   blanc:  ['poisson','fruits de mer','volaille','fromage','asiatique','apéritif','dessert','méditerranéen'],
@@ -377,6 +386,106 @@ function periodeNoel(date) {
   const m = d.getMonth() + 1, j = d.getDate();
   return m === 11 || m === 12 || (m === 1 && j <= 6);
 }
+// Thème des fêtes (novembre 2026) : même période que le Menu de Noël, recalculée à chaque
+// affichage (la tablette peut tourner des semaines sans recharger l'écran).
+// Pour essayer hors saison : ?fetes=1 dans l'adresse (?fetes=0 pour l'enlever).
+function themeFetes() {
+  try {
+    const p = new URLSearchParams(window.location.search).get('fetes');
+    if (p === '1') return true;
+    if (p === '0') return false;
+  } catch (e) {}
+  return periodeNoel();
+}
+const VERT_SAPIN = '#3F6B4E';
+// Étoile dorée des fêtes (remplace le losange des séparateurs)
+function EtoileFetes({size=14, color}) {
+  return <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true"><path d="M12 1.5l2.3 7.2 7.2 2.3-7.2 2.3L12 20.5l-2.3-7.2L2.5 11l7.2-2.3z" fill={color}/></svg>;
+}
+// Séparateur « ─── ◆ ─── » (étoile pendant les fêtes)
+function Separateur({I, marge}) {
+  return (
+    <div style={{display:'flex', alignItems:'center', justifyContent:'center', gap:12, margin:marge}}>
+      <span style={{width:56, height:1, background:I.bord2}}/>
+      {themeFetes() ? <EtoileFetes size={16} color={I.gold}/> : <span style={{width:6, height:6, transform:'rotate(45deg)', background:I.gold}}/>}
+      <span style={{width:56, height:1, background:I.bord2}}/>
+    </div>
+  );
+}
+// Flocons dorés : quelques étoiles qui tombent lentement (animation CSS légère pour
+// la Surface Go ; aucune si l'appareil demande de réduire les animations).
+// [position horizontale %, taille px, durée s, décalage s, opacité]
+const FLOCONS = [[4,13,19,2,.6],[11,9,24,11,.5],[19,17,21,6,.65],[27,10,26,17,.45],[36,14,18,9,.55],[44,9,23,3,.5],[53,18,25,14,.6],
+  [61,10,20,7,.5],[69,14,27,19,.55],[77,9,22,1,.45],[84,17,19,12,.65],[91,11,24,5,.5],[97,9,21,16,.45],[48,11,28,22,.45]];
+// ── Habillage commun (novembre 2026) ─────────────────────────────────────────
+// Ombres douces des cartes, réaction au toucher (la carte s'enfonce légèrement),
+// apparition en douceur des écrans et des listes, reflet lent du bouton principal.
+// Uniquement des animations CSS de transformation et d'opacité (légères pour la
+// Surface Go) ; aucune si l'appareil demande de réduire les animations.
+const STYLES_GLOBAUX =
+  '.ws-carte{box-shadow:0 1px 2px rgba(94,22,34,.04),0 12px 26px -14px rgba(94,22,34,.22);transition:transform .18s ease,box-shadow .25s ease,border-color .3s ease !important}' +
+  '.ws-tap{-webkit-tap-highlight-color:transparent;transition:transform .18s ease,box-shadow .25s ease,border-color .3s ease,filter .2s ease}' +
+  '.ws-tap:active{transform:scale(.975) !important;filter:brightness(.98)}' +
+  '.ws-carte:active{box-shadow:0 1px 2px rgba(94,22,34,.06),0 4px 10px -6px rgba(94,22,34,.2)}' +
+  '@keyframes wsEntree{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:none}}' +
+  '.ws-entree>*{animation:wsEntree .6s cubic-bezier(.2,.7,.2,1) both}' +
+  '.ws-entree>*:nth-child(2){animation-delay:.08s}.ws-entree>*:nth-child(3){animation-delay:.16s}.ws-entree>*:nth-child(4){animation-delay:.24s}.ws-entree>*:nth-child(5){animation-delay:.32s}' +
+  '.ws-cascade>*{animation:wsEntree .5s cubic-bezier(.2,.7,.2,1) both}' +
+  '.ws-cascade>*:nth-child(1){animation-delay:.12s}.ws-cascade>*:nth-child(2){animation-delay:.18s}.ws-cascade>*:nth-child(3){animation-delay:.24s}.ws-cascade>*:nth-child(4){animation-delay:.30s}' +
+  '.ws-cascade>*:nth-child(5){animation-delay:.36s}.ws-cascade>*:nth-child(6){animation-delay:.42s}.ws-cascade>*:nth-child(7){animation-delay:.48s}.ws-cascade>*:nth-child(8){animation-delay:.54s}.ws-cascade>*:nth-child(n+9){animation-delay:.6s}' +
+  '@keyframes wsReflet{0%,62%{transform:translateX(-120%) skewX(-18deg)}100%{transform:translateX(420%) skewX(-18deg)}}' +
+  '.ws-reflet{position:absolute;top:0;bottom:0;left:0;width:28%;background:linear-gradient(90deg,rgba(255,236,200,0),rgba(255,236,200,.16),rgba(255,236,200,0));animation:wsReflet 7s ease-in-out infinite;pointer-events:none}' +
+  '@media (prefers-reduced-motion: reduce){.ws-entree>*,.ws-cascade>*,.ws-reflet{animation:none !important}}';
+function StylesGlobaux() { return <style>{STYLES_GLOBAUX}</style>; }
+// Pastille ronde d'une icône (cartes de choix)
+function Pastille({children, taille=48, fond}) {
+  return <div style={{flexShrink:0, width:taille, height:taille, borderRadius:'50%', background:fond || 'linear-gradient(145deg, #fbf6ec, #f1e6d2)', border:'1px solid #eadcc3', display:'flex', alignItems:'center', justifyContent:'center', boxShadow:'inset 0 1px 0 rgba(255,255,255,.9)'}}>{children}</div>;
+}
+// Sarment de vigne au trait doré (ornement des coins de l'écran)
+function SarmentDore({taille=300}) {
+  const s = {fill:'none', stroke:'#b08d4f', strokeWidth:1.3, strokeLinecap:'round', strokeLinejoin:'round'};
+  const feuille = 'M0 0C-12-5-21-19-15-31C-8-28-3-24 0-20C1-32 9-41 18-40C17-30 14-23 10-17C22-21 33-15 35-6C25-4 14-2 0 0Z';
+  const nervures = 'M0 0L-8-25M0 0L13-30M0 0L27-8';
+  const grains = [[0,0],[11,0],[22,0],[33,0],[5.5,10],[16.5,10],[27.5,10],[11,20],[22,20],[16.5,30]];
+  return (
+    <svg width={taille} height={taille} viewBox="0 0 300 300" aria-hidden="true">
+      <path d="M-10 36C50 30 92 52 122 96S172 184 238 204" {...s}/>
+      <path d="M60 40C64 26 78 18 92 24" {...s}/>
+      <path d="M122 96c12-18 34-20 38-5c3 11-8 17-15 10c-4-4 0-10 5-8" {...s}/>
+      <path d="M196 182c16-6 30 2 28 14c-2 8-12 9-14 2" {...s}/>
+      <g transform="translate(84 44) rotate(-20) scale(1.25)"><path d={feuille} {...s}/><path d={nervures} {...s}/></g>
+      <g transform="translate(150 140) rotate(35) scale(1.05)"><path d={feuille} {...s}/><path d={nervures} {...s}/></g>
+      <g transform="translate(40 33) rotate(-150) scale(.75)"><path d={feuille} {...s}/><path d={nervures} {...s}/></g>
+      <path d="M128 104L132 122" {...s}/>
+      <g transform="translate(115 122)">{grains.map((g, i) => <circle key={i} cx={g[0]} cy={g[1]} r="5.6" {...s}/>)}</g>
+    </svg>
+  );
+}
+// Fond lumineux et chaud (dans le calque fixe : pas de redessin au défilement)
+const FOND_CHAUD = "radial-gradient(ellipse 80% 55% at 50% -5%, #fffcf5 0%, rgba(255,252,245,0) 70%), radial-gradient(ellipse 55% 45% at 100% 100%, rgba(176,141,79,.13) 0%, rgba(176,141,79,0) 70%), radial-gradient(ellipse 45% 40% at 0% 90%, rgba(94,22,34,.06) 0%, rgba(94,22,34,0) 70%), #f6eedf";
+// Décor plein écran, derrière la colonne de l'application : sarments dans les coins,
+// flocons dorés pendant les fêtes (accueil et question de l'âge).
+function Decor({flocons}) {
+  return (
+    <div aria-hidden="true" style={{position:'fixed', inset:0, pointerEvents:'none', zIndex:-1, overflow:'hidden', background:FOND_CHAUD}}>
+      <div style={{position:'absolute', top:-14, left:-20, opacity:.5}}><SarmentDore taille={230}/></div>
+      <div style={{position:'absolute', top:-14, right:-20, opacity:.5, transform:'scaleX(-1)'}}><SarmentDore taille={230}/></div>
+      {flocons && <FloconsDores/>}
+    </div>
+  );
+}
+function FloconsDores() {
+  return (
+    <div aria-hidden="true" style={{position:'absolute', inset:0, overflow:'hidden', pointerEvents:'none', zIndex:0}}>
+      <style>{'@keyframes wsChute{0%{transform:translate3d(0,-6vh,0) rotate(0deg)}50%{transform:translate3d(14px,50vh,0) rotate(90deg)}100%{transform:translate3d(-6px,108vh,0) rotate(180deg)}}@media (prefers-reduced-motion: reduce){.ws-flocon{display:none}}'}</style>
+      {FLOCONS.map((f, i) => (
+        <span key={i} className="ws-flocon" style={{position:'absolute', top:0, left:f[0] + '%', opacity:f[4], animation:'wsChute ' + f[2] + 's linear ' + (-f[3]) + 's infinite', willChange:'transform'}}>
+          <EtoileFetes size={f[1]} color="#c9a45c"/>
+        </span>
+      ))}
+    </div>
+  );
+}
 // Habillage des cartes : le même pour tous les vins. Il n'y a plus de note de qualité
 // propre à un vin (subjective) : la seule appréciation affichée est l'accord avec la
 // recherche du client (wine.accord, calculé par le moteur d'accords).
@@ -426,9 +535,18 @@ function Bottle({wine, h=150, label=true}) {
   const champ = shapeKey === 'champagne';
   const PATH = S.path;
   const w = h/3;
-  const initial = (wine.name||'V').trim()[0].toUpperCase();
   const region = (wine.region||'').toUpperCase();
-  const vintage = 2016 + (wine.id ? (wine.id % 7) : 3);
+  // Étiquette de la bouteille dessinée (vins sans photo) : seulement des informations
+  // vraies — appellation (ou région) et millésime s'il est connu. Jamais d'initiale,
+  // de « Grand vin » ni de millésime inventé.
+  const mots = String(wine.appellation || wine.region || '').toUpperCase().split(/\s+/).filter(Boolean);
+  let lignesEtiq = [mots.join(' ')];
+  if (lignesEtiq[0].length > 15 && mots.length > 1) {
+    let coupe = 1, ecart = 99;
+    for (let k = 1; k < mots.length; k++) { const d = Math.abs(mots.slice(0, k).join(' ').length - mots.slice(k).join(' ').length); if (d < ecart) { ecart = d; coupe = k; } }
+    lignesEtiq = [mots.slice(0, coupe).join(' '), mots.slice(coupe).join(' ')];
+  }
+  const millesime = wine.millesime ? String(wine.millesime) : '';
   const showText = label && h >= 120;
   const lx = S.lb[0], ly = S.lb[1], lw = S.lb[2], lh = S.lb[3];
   const emY = ly + (showText ? 36 : 30);
@@ -517,14 +635,20 @@ function Bottle({wine, h=150, label=true}) {
       <rect x={lx} y={ly} width={lw} height={lh} rx="2.5" fill={`url(#${id}tn)`} opacity="0.3"/>
       <rect x={lx+3} y={ly+3} width={lw-6} height={lh-6} rx="1.5" fill="none" stroke={cfg.accent} strokeWidth="0.8" opacity="0.7"/>
       <rect x={lx+5} y={ly+5} width={lw-10} height={lh-10} rx="1" fill="none" stroke={cfg.accent} strokeWidth="0.4" opacity="0.4"/>
-      {showText && <text x="60" y={ly+15} textAnchor="middle" fontFamily="'Montserrat',sans-serif" fontSize="5" letterSpacing="1.4" fill={cfg.ink} opacity="0.85">GRAND VIN</text>}
+      {/* Médaillon : petite grappe dorée dans un double cercle */}
       <circle cx="60" cy={emY} r="11" fill="none" stroke={cfg.accent} strokeWidth="1"/>
       <circle cx="60" cy={emY} r="8.5" fill="none" stroke={cfg.accent} strokeWidth="0.5" opacity="0.55"/>
-      <text x="60" y={emY+5.5} textAnchor="middle" fontFamily="'Cormorant Garamond',serif" fontSize="16" fontWeight="700" fill={cfg.ink}>{initial}</text>
-      {showText && <>
-        <text x="60" y={ly+62} textAnchor="middle" fontFamily="'Montserrat',sans-serif" fontSize="5.2" letterSpacing="0.6" fill={cfg.ink} textLength={lw-14} lengthAdjust="spacingAndGlyphs">{region}</text>
-        <line x1="40" y1={ly+68} x2="80" y2={ly+68} stroke={cfg.accent} strokeWidth="0.5" opacity="0.5"/>
-        <text x="60" y={ly+82} textAnchor="middle" fontFamily="'Cormorant Garamond',serif" fontSize="13" fontWeight="600" fill={cfg.ink}>{vintage}</text>
+      <g fill={cfg.accent} opacity="0.9">
+        {[[-3.2,-2.4],[0,-2.4],[3.2,-2.4],[-1.6,0.4],[1.6,0.4],[0,3.2]].map((g, k) => <circle key={k} cx={60 + g[0]} cy={emY + g[1]} r="1.55"/>)}
+      </g>
+      <path d={'M60 ' + (emY - 4.2) + 'q1.5-2.6 4-3'} fill="none" stroke={cfg.accent} strokeWidth="0.7" strokeLinecap="round"/>
+      {showText && lignesEtiq[0] && lignesEtiq.map((t, k) => (
+        <text key={k} x="60" y={ly + 58 + k * 8} textAnchor="middle" fontFamily="'Montserrat',sans-serif" fontSize="5.4" fontWeight="600" letterSpacing="0.7" fill={cfg.ink}
+          {...(t.length > 14 ? {textLength: lw - 14, lengthAdjust: 'spacingAndGlyphs'} : {})}>{t}</text>
+      ))}
+      {showText && millesime && <>
+        <line x1="44" y1={ly + 64 + (lignesEtiq.length - 1) * 8} x2="76" y2={ly + 64 + (lignesEtiq.length - 1) * 8} stroke={cfg.accent} strokeWidth="0.5" opacity="0.5"/>
+        <text x="60" y={ly + 77 + (lignesEtiq.length - 1) * 8} textAnchor="middle" fontFamily="'Cormorant Garamond',serif" fontSize="12" fontWeight="600" fill={cfg.ink}>{millesime}</text>
       </>}
     </svg>
   );
@@ -844,7 +968,7 @@ function Header({title, subtitle, onBack, right}) {
   // En-tête commun des écrans secondaires, direction « Ivoire épuré ».
   const I = C_IVOIRE;
   return (
-    <div style={{background:I.bg, borderBottom:'1px solid ' + I.bord, flexShrink:0}}>
+    <div style={{background:'transparent', borderBottom:'1px solid ' + I.bord, flexShrink:0}}>
       <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', gap:12, padding:'20px 24px 16px'}}>
         {onBack ? (
           <button onClick={onBack} style={{display:'flex', alignItems:'center', gap:8, minHeight:46, padding:'0 18px 0 12px', background:'transparent', border:'1px solid ' + I.bord2, borderRadius:999, color:I.ink, fontSize:13, letterSpacing:'.04em', cursor:'pointer', fontFamily:'Montserrat,sans-serif', flexShrink:0}}>
@@ -1040,55 +1164,69 @@ function WineModal({wine, onClose}) {
 }
 
 // ── HOME ──────────────────────────────────────────────────────────────────────
-function Home({setView}) {
+function Home({setView, ouvrirFetes}) {
   // Accueil en direction « Ivoire épuré » : signature typographique (plus de
   // bouteille dessinée en guise de logo), une action principale, deux secondaires.
   const C = C_IVOIRE;
   const survol = (e, on) => { e.currentTarget.style.borderColor = on ? C.wine : C.bord; };
   const secondaires = [
-    {v:'chat', label:'Parler au sommelier', sub:'Décrivez votre plat, posez votre question',
+    {v:'chat', label:'Parler au sommelier', sub:'Décrivez votre plat, posez votre question', fond:'radial-gradient(circle at 35% 30%, #ffffff, #f6e2e5 78%)',
      icone: <svg width="28" height="28" viewBox="0 0 32 32" fill="none" stroke={C.wine} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 8.5C5 6.6 6.6 5 8.5 5h15C25.4 5 27 6.6 27 8.5v10c0 1.9-1.6 3.5-3.5 3.5H14l-6 5v-5h0.5C6.6 22 5 20.4 5 18.5z"/><path d="M11 12h10M11 16h6"/></svg>},
-    {v:'mystery', label:'Choix mystère', sub:'Laissez-vous surprendre',
+    {v:'mystery', label:'Choix mystère', sub:'Laissez-vous surprendre', fond:'radial-gradient(circle at 35% 30%, #ffffff, #f9ecd2 78%)',
      icone: <svg width="28" height="28" viewBox="0 0 32 32" fill="none" stroke={C.wine} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M16 4l2.6 6.4L25 13l-6.4 2.6L16 22l-2.6-6.4L7 13l6.4-2.6z"/><path d="M25 21l1 2.5 2.5 1-2.5 1-1 2.5-1-2.5-2.5-1 2.5-1z"/></svg>},
   ];
 
+  const fetes = themeFetes();
   return (
-    <div style={{minHeight:'var(--ecran, 100vh)', background:C.bg, color:C.ink, display:'flex', flexDirection:'column', paddingBottom:40}}>
+    <div className="ws-entree" style={{minHeight:'var(--ecran, 100vh)', background:'transparent', color:C.ink, display:'flex', flexDirection:'column', paddingBottom:40, position:'relative'}}>
       {/* Signature */}
-      <div style={{textAlign:'center', padding:'clamp(32px, calc(var(--ecran, 100vh) * .07), 96px) 24px 0'}}>
+      <div style={{textAlign:'center', padding:(fetes ? 'clamp(20px, calc(var(--ecran, 100vh) * .035), 56px)' : 'clamp(32px, calc(var(--ecran, 100vh) * .07), 96px)') + ' 24px 0', position:'relative', zIndex:1}}>
         <div style={capsIv(11, C.gold, {letterSpacing:'.34em', fontWeight:600, marginBottom:14})}>Cave &amp; Sélection</div>
         {/* Appui long (3 s) sur le logo : écran de dépannage, pour l'installateur. */}
         <h1 {...appuiLong(() => setView('depannage'))} style={{...serif, margin:0, fontSize:'clamp(3.4rem,11vw,5rem)', fontWeight:500, lineHeight:.95, letterSpacing:'-.02em', color:C.wine, userSelect:'none', WebkitUserSelect:'none', WebkitTouchCallout:'none'}}>WineSelect</h1>
-        <div style={{display:'flex', alignItems:'center', justifyContent:'center', gap:12, margin:'20px auto 0'}}>
-          <span style={{width:56, height:1, background:C.bord2}}/>
-          <span style={{width:6, height:6, transform:'rotate(45deg)', background:C.gold}}/>
-          <span style={{width:56, height:1, background:C.bord2}}/>
-        </div>
-        <p style={{...serif, fontStyle:'italic', fontSize:22, color:C.body, margin:'18px 0 0'}}>Le sommelier de votre magasin</p>
+        <Separateur I={C} marge={fetes ? '14px auto 0' : '20px auto 0'}/>
+        <p style={{...serif, fontStyle:'italic', fontSize:22, color:C.body, margin:fetes ? '12px 0 0' : '18px 0 0'}}>{fetes ? 'Le sommelier de vos fêtes' : 'Le sommelier de votre magasin'}</p>
       </div>
 
       {/* Action principale */}
-      <div style={{width:'100%', maxWidth:560, margin:'0 auto', padding:'clamp(28px, calc(var(--ecran, 100vh) * .05), 64px) 24px 0'}}>
+      <div style={{width:'100%', maxWidth:560, margin:'0 auto', padding:(fetes ? 'clamp(18px, calc(var(--ecran, 100vh) * .03), 40px)' : 'clamp(28px, calc(var(--ecran, 100vh) * .05), 64px)') + ' 24px 0', position:'relative', zIndex:1}}>
         <button onClick={()=>setView('selection')}
-          style={{width:'100%', textAlign:'left', display:'flex', alignItems:'center', gap:20, padding:'30px 28px', background:C.wine, border:'none', borderRadius:20, cursor:'pointer', boxShadow:'0 22px 48px rgba(94,22,34,.18)', fontFamily:'Montserrat,sans-serif', transition:'transform .4s ease'}}
+          className="ws-tap" style={{position:'relative', overflow:'hidden', width:'100%', textAlign:'left', display:'flex', alignItems:'center', gap:20, padding:'30px 28px', background:'linear-gradient(135deg, #7a2232 0%, #5e1622 46%, #440e19 100%)', border:'none', borderRadius:22, cursor:'pointer', boxShadow:'0 26px 50px -20px rgba(94,22,34,.6), 0 8px 18px -10px rgba(68,14,25,.35), inset 0 0 0 1px rgba(216,189,132,.25), inset 0 1px 0 rgba(255,230,200,.12)', fontFamily:'Montserrat,sans-serif'}}
           onMouseEnter={e=>{e.currentTarget.style.transform='translateY(-2px)';}} onMouseLeave={e=>{e.currentTarget.style.transform='translateY(0)';}}>
-          <div style={{flex:1}}>
+          <span className="ws-reflet"/>
+          <div style={{flex:1, position:'relative'}}>
             <div style={capsIv(11, '#d8bd84', {letterSpacing:'.24em', fontWeight:600, marginBottom:12})}>Sélection guidée</div>
             <div style={{...serif, fontSize:'clamp(1.9rem,6vw,2.4rem)', fontWeight:500, color:C.bg, lineHeight:1.05, marginBottom:10}}>Trouver mon vin idéal</div>
             <div style={{fontSize:14, color:'rgba(250,246,238,.75)', lineHeight:1.6}}>3 ou 4 questions, 3 vins choisis pour vous.</div>
           </div>
-          <div style={{flexShrink:0, width:56, height:56, borderRadius:'50%', border:'1px solid rgba(216,189,132,.6)', display:'flex', alignItems:'center', justifyContent:'center', color:'#d8bd84'}}>
+          <div style={{position:'relative', flexShrink:0, width:60, height:60, borderRadius:'50%', background:'linear-gradient(145deg, #ecd5a2, #b08d4f)', boxShadow:'0 8px 18px -6px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.5)', display:'flex', alignItems:'center', justifyContent:'center', color:'#4a0f1a'}}>
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
           </div>
         </button>
 
+        {/* Pendant les fêtes : raccourci vers le Menu de Noël du parcours guidé */}
+        {fetes && (
+          <button onClick={ouvrirFetes} className="ws-carte ws-tap"
+            style={{width:'100%', textAlign:'left', display:'flex', alignItems:'center', gap:18, marginTop:12, padding:'16px 22px', background:C.cream, border:'1px solid #d9c49a', borderRadius:18, cursor:'pointer', fontFamily:'Montserrat,sans-serif', boxShadow:'0 10px 26px rgba(63,107,78,.08)'}}>
+            <div style={{flexShrink:0, width:54, height:54, borderRadius:'50%', background:'rgba(63,107,78,.08)', display:'flex', alignItems:'center', justifyContent:'center'}}>
+              <PairingIcon id="noel" color={VERT_SAPIN} size={30}/>
+            </div>
+            <div style={{flex:1}}>
+              <div style={capsIv(10.5, VERT_SAPIN, {letterSpacing:'.24em', fontWeight:600, marginBottom:6})}>Menu des fêtes</div>
+              <div style={{...serif, fontSize:24, fontWeight:600, color:C.ink, lineHeight:1.1, marginBottom:4}}>Quel vin pour votre repas de fêtes ?</div>
+              <div style={{fontSize:13, color:C.muted, lineHeight:1.5}}>Huîtres, foie gras, chapon, bûche…</div>
+            </div>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={VERT_SAPIN} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{flexShrink:0}}><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+          </button>
+        )}
+
         {/* Deux entrées secondaires */}
-        <div style={{display:'grid', gridTemplateColumns:'repeat(2, minmax(0, 1fr))', gap:14, marginTop:14}}>
+        <div style={{display:'grid', gridTemplateColumns:'repeat(2, minmax(0, 1fr))', gap:fetes ? 12 : 14, marginTop:fetes ? 12 : 14}}>
           {secondaires.map(item => (
-            <button key={item.v} onClick={()=>setView(item.v)}
-              style={{textAlign:'left', display:'flex', flexDirection:'column', gap:12, padding:'22px 20px', minHeight:140, background:C.cream, border:'1px solid ' + C.bord, borderRadius:18, cursor:'pointer', fontFamily:'Montserrat,sans-serif', transition:'border-color .3s'}}
+            <button key={item.v} onClick={()=>setView(item.v)} className="ws-carte ws-tap"
+              style={{textAlign:'left', display:'flex', flexDirection:'column', gap:fetes ? 8 : 12, padding:fetes ? '16px 20px' : '22px 20px', minHeight:fetes ? 112 : 140, background:C.cream, border:'1px solid ' + C.bord, borderRadius:18, cursor:'pointer', fontFamily:'Montserrat,sans-serif', transition:'border-color .3s'}}
               onMouseEnter={e=>survol(e,true)} onMouseLeave={e=>survol(e,false)}>
-              {item.icone}
+              <Pastille fond={item.fond}>{item.icone}</Pastille>
               <div>
                 <div style={{...serif, fontSize:22, fontWeight:600, color:C.ink, lineHeight:1.1, marginBottom:5}}>{item.label}</div>
                 <div style={{fontSize:13, color:C.muted, lineHeight:1.5}}>{item.sub}</div>
@@ -1159,6 +1297,23 @@ const RECETTES_UI = [
   {id:'sauce',       label:'Une sauce ou un déglaçage', couleur:null},
 ];
 
+// ── Couleur par catégorie (novembre 2026) ───────────────────────────────────
+// Chaque occasion, style de goût et tranche de budget a sa teinte : c = couleur
+// d'accent (icône, flèche), bg = fond clair (médaillon, lavis de la carte).
+const TEINTES_OCCASION = {
+  aperitif: {c:'#a77a24', bg:'#f9ecd2'},   // or champagne
+  repas:    {c:'#7d1f2e', bg:'#f6e2e5'},   // bordeaux
+  offrir:   {c:'#b0383a', bg:'#fbe4df'},   // rouge cadeau
+  cuisiner: {c:'#b0602f', bg:'#f8e8dc'},   // terracotta
+};
+const TEINTES_GOUT = {
+  leger_frais:     {c:'#3f8378', bg:'#e2f0ec'},
+  fruite_gourmand: {c:'#bb4367', bg:'#fae3ea'},
+  riche_intense:   {c:'#6b2635', bg:'#f1dfe3'},
+  doux:            {c:'#b9852a', bg:'#faedd3'},
+};
+// Budgets : de l'or clair au bordeaux profond à mesure que le prix monte
+const TEINTES_BUDGET = ['#a77a24', '#9a5a2c', '#8a3a30', '#74242f', '#5e1622'];
 function OccasionIcon({id, size=30, color}) {
   const c = color || C.wine;
   const s = {fill:'none', stroke:c, strokeWidth:1.6, strokeLinecap:'round', strokeLinejoin:'round'};
@@ -1183,13 +1338,16 @@ function OccasionIcon({id, size=30, color}) {
   return null;
 }
 
-function Selection({setView, setResults}) {
+function Selection({setView, setResults, depart}) {
   const C = C_IVOIRE;   // écran en direction « Ivoire épuré »
-  const [screen,   setScreen]   = useState('occasion');
-  const [hist,     setHist]     = useState([]);
-  const [occasion, setOccasion] = useState(null);
+  // depart 'noel' : raccourci « Menu des fêtes » de l'accueil, on ouvre directement le choix
+  // du plat de Noël (Retour repasse par « Qu'allez-vous manger ? » puis l'occasion).
+  const noelDirect = depart === 'noel';
+  const [screen,   setScreen]   = useState(noelDirect ? 'noel' : 'occasion');
+  const [hist,     setHist]     = useState(noelDirect ? ['occasion', 'plat'] : []);
+  const [occasion, setOccasion] = useState(noelDirect ? 'repas' : null);
   const [gout,     setGout]     = useState(null);
-  const [pairing,  setPairing]  = useState(null);
+  const [pairing,  setPairing]  = useState(noelDirect ? 'noel' : null);
   const [detail,   setDetail]   = useState(null);   // {id, label}
   const [platLibre, setPlatLibre] = useState('');
   const [recette,  setRecette]  = useState(null);
@@ -1203,6 +1361,8 @@ function Selection({setView, setResults}) {
 
   // Mesure : chaque étape atteinte (la dernière d'une session sans résultat = l'abandon)
   useEffect(() => { if (screen !== 'thinking') noterUsage('etape', {etape: screen}); }, [screen]);
+  // Chaque étape s'affiche depuis le haut de l'écran
+  useEffect(() => { window.scrollTo(0, 0); }, [screen]);
 
   const go = s => { setHist(h => h.concat([screen])); setScreen(s); };
   const back = () => {
@@ -1337,20 +1497,39 @@ function Selection({setView, setResults}) {
   // ── Éléments d'interface ─────────────────────────────────────────────────
   const titre = t => <h2 style={{...serif, fontSize:'clamp(1.9rem,5vw,2.5rem)', fontWeight:500, lineHeight:1.08, letterSpacing:'-.01em', color:C.ink, textAlign:'center', margin:'6px 0 26px'}}>{t}</h2>;
   const hover = (e, on) => { e.currentTarget.style.borderColor = on ? C.wine : C.bord; };
-  const Carte = ({label, desc, onClick, icon, accent}) => (
-    <div onClick={onClick} onMouseEnter={e => hover(e, true)} onMouseLeave={e => hover(e, false)}
-      style={{background:accent ? C.soft : C.cream, border:'1px solid ' + C.bord, borderRadius:16, padding:'18px 20px', minHeight:72, cursor:'pointer', transition:'border-color .3s', display:'flex', alignItems:'center', gap:16}}>
-      {icon && <div style={{flexShrink:0, display:'flex'}}>{icon}</div>}
+  const Carte = ({label, desc, onClick, icon, accent, teinte}) => (
+    <div onClick={onClick} onMouseEnter={e => hover(e, true)} onMouseLeave={e => { hover(e, false); if (teinte) e.currentTarget.style.borderLeftColor = teinte.c; }} className="ws-carte ws-tap"
+      style={{background:accent ? 'linear-gradient(135deg, #f8f0e1, #f2e6d1)' : teinte ? 'linear-gradient(100deg, ' + teinte.bg + ' 0%, #fffdf9 46%, #ffffff 100%)' : 'linear-gradient(180deg, #ffffff, #fffbf5)', border:'1px solid ' + C.bord, borderLeft:teinte ? '4px solid ' + teinte.c : '1px solid ' + C.bord, borderRadius:18, padding:'16px 18px', minHeight:76, cursor:'pointer', display:'flex', alignItems:'center', gap:16}}>
+      {icon && <Pastille fond={teinte ? 'radial-gradient(circle at 35% 30%, #ffffff, ' + teinte.bg + ' 78%)' : null}>{icon}</Pastille>}
       <div style={{flex:1, textAlign:'left'}}>
         <div style={{...serif, fontSize:21, fontWeight:600, color:C.ink, lineHeight:1.2}}>{label}</div>
         {desc && <div style={{fontSize:13, color:C.muted, marginTop:3}}>{desc}</div>}
       </div>
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={C.bord2} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{flexShrink:0}}><path d="M9 5l7 7-7 7"/></svg>
+      <div style={{flexShrink:0, width:32, height:32, borderRadius:'50%', background:teinte ? teinte.bg : 'rgba(176,141,79,.1)', display:'flex', alignItems:'center', justifyContent:'center'}}>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={teinte ? teinte.c : C.gold} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg>
+      </div>
     </div>
   );
+  // Vignette photo d'un plat : photo en haut, filet de la couleur de la catégorie, nom dessous.
+  // Sans photo (ou si elle ne charge pas) : l'icône de la catégorie dans un médaillon.
+  const TuilePhoto = ({id, label, onClick, hauteur, couleur}) => {
+    const [sansPhoto, setSansPhoto] = useState(!photoAccord(id));
+    const teinte = couleur || PAIRING_COLORS[id] || C.wine;
+    return (
+      <div onClick={onClick} className="ws-carte ws-tap" style={{background:'#ffffff', border:'1px solid ' + C.bord, borderRadius:16, overflow:'hidden', cursor:'pointer', display:'flex', flexDirection:'column'}}>
+        <div style={{position:'relative', height:hauteur || 88, background:PAIRING_BG[id] || '#f3ece0', display:'flex', alignItems:'center', justifyContent:'center'}}>
+          {sansPhoto ? <Pastille taille={50}><PairingIcon id={id} size={28}/></Pastille>
+            : <img src={photoAccord(id)} alt="" onError={() => setSansPhoto(true)} style={{width:'100%', height:'100%', objectFit:'cover', display:'block'}}/>}
+          <div style={{position:'absolute', inset:0, boxShadow:'inset 0 -30px 26px -24px rgba(42,18,21,.35)', pointerEvents:'none'}}/>
+        </div>
+        <div style={{height:3, background:teinte}}/>
+        <div style={{...serif, fontSize:17, fontWeight:600, color:C.ink, lineHeight:1.15, padding:'9px 6px 11px', textAlign:'center'}}>{label}</div>
+      </div>
+    );
+  };
   const BoutonLibre = ({label, onClick}) => (
     <div onClick={onClick} onMouseEnter={e => e.currentTarget.style.borderColor = C.wine} onMouseLeave={e => e.currentTarget.style.borderColor = C.bord2}
-      style={{gridColumn:'1 / -1', marginTop:6, background:'transparent', border:'1px dashed ' + C.bord2, borderRadius:14, padding:'16px 10px', minHeight:56, textAlign:'center', cursor:'pointer', color:C.wine, fontSize:17, ...serif, fontWeight:600, transition:'border-color .3s'}}>
+      className="ws-tap" style={{gridColumn:'1 / -1', marginTop:6, background:'rgba(255,255,255,.45)', border:'1px dashed ' + C.bord2, borderRadius:16, padding:'16px 10px', minHeight:56, textAlign:'center', cursor:'pointer', color:C.wine, fontSize:17, ...serif, fontWeight:600, transition:'border-color .3s'}}>
       {label}
     </div>
   );
@@ -1364,22 +1543,25 @@ function Selection({setView, setResults}) {
   const platsOpts = (periodeNoel() ? [{id:'noel', label:'Menu de Noël'}] : []).concat(PAIRINGS.filter(p => p.id !== 'apéritif'));
 
   return (
-    <div style={{minHeight:'var(--ecran, 100vh)', background:C.bg, color:C.ink, paddingBottom:96}}>
+    <div style={{minHeight:'var(--ecran, 100vh)', background:'transparent', color:C.ink, paddingBottom:96}}>
       <EnteteIvoire onBack={screen === 'thinking' ? null : back}
         droite={screen !== 'thinking' && (couleur || budget) ? <span style={capsIv(10, C.muted, {letterSpacing:'.14em'})}>{count + ' vins'}</span> : null}/>
       <div style={{padding:'18px 24px 0', maxWidth:560, margin:'0 auto'}}>
         <div style={capsIv(11, C.gold, {letterSpacing:'.22em', textAlign:'center', marginBottom:10})}>{'Étape ' + Math.min(step, total) + ' sur ' + total + ' · ' + (LABEL[screen] || '')}</div>
         <div style={{display:'flex', gap:6}}>
-          {Array.from({length: total}, (_, i) => i + 1).map(i => <div key={i} style={{flex:1, height:2, borderRadius:2, background: step >= i ? C.wine : C.bord, transition:'background .5s'}}/>)}
+          {Array.from({length: total}, (_, i) => i + 1).map(i => <div key={i} style={{flex:1, height:3, borderRadius:3, background: step >= i ? 'linear-gradient(90deg, #b08d4f, #5e1622)' : 'rgba(176,141,79,.18)', transition:'background .5s'}}/>)}
         </div>
       </div>
-      <div style={{maxWidth:560, margin:'0 auto', padding:'28px 24px'}}>
+      <div key={screen} className="ws-entree" style={{maxWidth:560, margin:'0 auto', padding:'28px 24px'}}>
 
         {screen === 'occasion' && (
           <div>
             {titre('Je cherche un vin pour…')}
-            <div style={{display:'grid', gridTemplateColumns:'1fr', gap:10, maxWidth:440, margin:'0 auto'}}>
-              {OCCASIONS_UI.map(o => <Carte key={o.id} label={o.label} desc={o.desc} icon={<OccasionIcon id={o.id}/>} onClick={() => pickOccasion(o.id)}/>)}
+            <div className="ws-cascade" style={{display:'grid', gridTemplateColumns:'1fr', gap:12, maxWidth:460, margin:'0 auto'}}>
+              {OCCASIONS_UI.map(o => {
+                const cadeau = o.id === 'offrir' && themeFetes();
+                return <Carte key={o.id} label={cadeau ? '… offrir pour les fêtes' : o.label} desc={cadeau ? 'Une bouteille à glisser sous le sapin' : o.desc} teinte={TEINTES_OCCASION[o.id]} icon={<OccasionIcon id={o.id} color={TEINTES_OCCASION[o.id].c}/>} onClick={() => pickOccasion(o.id)}/>;
+              })}
             </div>
           </div>
         )}
@@ -1390,8 +1572,12 @@ function Selection({setView, setResults}) {
               : apero && couleur === 'bulles' ? 'Quel style de bulles ?'
               : apero && couleur ? 'Quel style de ' + couleur + ' ?'
               : "Qu'aimez-vous dans un vin ?")}
-            <div style={{display:'grid', gridTemplateColumns:'1fr', gap:9, maxWidth:440, margin:'0 auto'}}>
-              {goutsOrdre.map(g => <Carte key={g.id} label={g.label} desc={g.desc} accent={g.id === 'inconnu'} onClick={() => pickGout(g.id)}/>)}
+            <div className="ws-cascade" style={{display:'grid', gridTemplateColumns:'1fr', gap:11, maxWidth:460, margin:'0 auto'}}>
+              {goutsOrdre.map(g => {
+                const tc = TYPES.find(t => t.id === couleur);
+                const teinte = g.id === 'inconnu' ? null : TEINTES_GOUT[g.id] || (tc ? {c:tc.color, bg:tc.bg} : null);
+                return <Carte key={g.id} label={g.label} desc={g.desc} accent={g.id === 'inconnu'} teinte={teinte} onClick={() => pickGout(g.id)}/>;
+              })}
             </div>
           </div>
         )}
@@ -1399,15 +1585,8 @@ function Selection({setView, setResults}) {
         {screen === 'plat' && (
           <div>
             {titre("Qu'allez-vous manger ?")}
-            <div style={{display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:10}}>
-              {platsOpts.map(p => (
-                <div key={p.id} onClick={() => pickPairing(p.id)} style={{background:C.cream, border:'1px solid ' + C.bord, borderRadius:14, padding:'18px 6px 16px', minHeight:96, textAlign:'center', cursor:'pointer', transition:'border-color .3s', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:8}}
-                  onMouseEnter={e => { e.currentTarget.style.borderColor = PAIRING_COLORS[p.id] || C.wine; }}
-                  onMouseLeave={e => { e.currentTarget.style.borderColor = C.bord; }}>
-                  <PairingIcon id={p.id} size={30}/>
-                  <div style={{...serif, fontSize:17, fontWeight:600, color:C.ink, lineHeight:1.15}}>{p.label}</div>
-                </div>
-              ))}
+            <div className="ws-cascade" style={{display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:10}}>
+              {platsOpts.map(p => <TuilePhoto key={p.id} id={p.id} label={p.label} onClick={() => pickPairing(p.id)}/>)}
               <BoutonLibre label="Un autre plat ? Dites-le" onClick={ouvrirLibre}/>
             </div>
           </div>
@@ -1417,15 +1596,15 @@ function Selection({setView, setResults}) {
           <div>
             {titre('Comment est-il préparé ?')}
             <div style={{textAlign:'center', fontSize:13, color:C.muted, marginTop:-16, marginBottom:22}}>Pour un accord plus juste — facultatif</div>
-            <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:10}}>
+            <div className="ws-cascade" style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:12}}>
               {(PAIRING_DETAILS[pairing] || []).map(d => (
-                <div key={d.id} onClick={() => pickDetail(d)} style={{background:C.cream, border:'1px solid ' + C.bord, borderRadius:14, padding:'18px 12px', minHeight:72, display:'flex', alignItems:'center', justifyContent:'center', textAlign:'center', cursor:'pointer', transition:'border-color .3s'}}
+                <div key={d.id} onClick={() => pickDetail(d)} className="ws-carte ws-tap" style={{background:'linear-gradient(180deg, #ffffff, #fffbf5)', border:'1px solid ' + C.bord, borderRadius:16, padding:'18px 12px', minHeight:76, display:'flex', alignItems:'center', justifyContent:'center', textAlign:'center', cursor:'pointer'}}
                   onMouseEnter={e => { e.currentTarget.style.borderColor = C.wine; }}
                   onMouseLeave={e => { e.currentTarget.style.borderColor = C.bord; }}>
-                  <div style={{...serif, fontSize:17, fontWeight:600, color:C.ink, lineHeight:1.2}}>{d.label}</div>
+                  <div style={{...serif, fontSize:18, fontWeight:600, color:C.ink, lineHeight:1.2}}>{d.label}</div>
                 </div>
               ))}
-              <div onClick={() => pickDetail(null)} style={{gridColumn:'1 / -1', marginTop:6, background:C.soft, border:'1px solid ' + C.bord, borderRadius:14, padding:'16px 10px', minHeight:56, textAlign:'center', cursor:'pointer', color:C.body, fontSize:14}}
+              <div onClick={() => pickDetail(null)} className="ws-tap" style={{gridColumn:'1 / -1', marginTop:6, background:C.soft, border:'1px solid ' + C.bord, borderRadius:14, padding:'16px 10px', minHeight:56, textAlign:'center', cursor:'pointer', color:C.body, fontSize:14}}
                 onMouseEnter={e => e.currentTarget.style.borderColor = C.wine} onMouseLeave={e => e.currentTarget.style.borderColor = C.bord}>
                 Peu importe, conseillez-moi
               </div>
@@ -1436,14 +1615,8 @@ function Selection({setView, setResults}) {
         {screen === 'noel' && (
           <div>
             {titre('Quel plat ?')}
-            <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:10}}>
-              {NOEL_PLATS.map(d => (
-                <div key={d.id} onClick={() => pickDetail(d)} style={{background:C.cream, border:'1px solid ' + C.bord, borderRadius:14, padding:'18px 12px', minHeight:72, display:'flex', alignItems:'center', justifyContent:'center', textAlign:'center', cursor:'pointer', transition:'border-color .3s'}}
-                  onMouseEnter={e => { e.currentTarget.style.borderColor = C.wine; }}
-                  onMouseLeave={e => { e.currentTarget.style.borderColor = C.bord; }}>
-                  <div style={{...serif, fontSize:18, fontWeight:600, color:C.ink, lineHeight:1.2}}>{d.label}</div>
-                </div>
-              ))}
+            <div className="ws-cascade" style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:12}}>
+              {NOEL_PLATS.map(d => <TuilePhoto key={d.id} id={d.id} label={d.label} hauteur={90} couleur={VERT_SAPIN} onClick={() => pickDetail(d)}/>)}
               <BoutonLibre label="Un autre plat ? Dites-le" onClick={ouvrirLibre}/>
             </div>
           </div>
@@ -1492,12 +1665,13 @@ function Selection({setView, setResults}) {
         {screen === 'budget' && (
           <div>
             {titre('Quel est votre budget ?')}
-            <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:12}}>
+            <div className="ws-cascade" style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:12}}>
               {BUDGETS.map((b, i) => (
-                <div key={b.id} onClick={() => pickBudget(b.id)} style={{gridColumn:(i === BUDGETS.length - 1 && BUDGETS.length % 2) ? '1 / -1' : 'auto', background:budget === b.id ? C.soft : C.cream, border:'1px solid ' + (budget === b.id ? C.wine : C.bord), borderRadius:16, padding:'22px 14px', minHeight:104, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', textAlign:'center', cursor:'pointer', transition:'border-color .3s'}}
+                <div key={b.id} onClick={() => pickBudget(b.id)} className="ws-carte ws-tap" style={{gridColumn:(i === BUDGETS.length - 1 && BUDGETS.length % 2) ? '1 / -1' : 'auto', background:budget === b.id ? 'linear-gradient(135deg, #f8f0e1, #f2e6d1)' : 'linear-gradient(180deg, #ffffff, #fffbf5)', border:'1px solid ' + (budget === b.id ? C.wine : C.bord), borderRadius:18, padding:'22px 14px', minHeight:108, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', textAlign:'center', cursor:'pointer', transition:'border-color .3s'}}
                   onMouseEnter={e => e.currentTarget.style.borderColor = C.wine}
                   onMouseLeave={e => { if (budget !== b.id) e.currentTarget.style.borderColor = C.bord; }}>
-                  <div style={{...serif, fontSize:26, fontWeight:600, color:C.wine, marginBottom:6, lineHeight:1}}>{b.label}</div>
+                  <div style={{width:34, height:3, borderRadius:3, background:TEINTES_BUDGET[i] || C.wine, marginBottom:12, opacity:.85}}/>
+                  <div style={{...serif, fontSize:26, fontWeight:600, color:TEINTES_BUDGET[i] || C.wine, marginBottom:6, lineHeight:1}}>{b.label}</div>
                   <div style={capsIv(10, C.muted, {letterSpacing:'.14em'})}>{b.desc}</div>
                 </div>
               ))}
@@ -1512,12 +1686,12 @@ function Selection({setView, setResults}) {
               <div style={{marginBottom:12}}>
                 <Carte label={offrir ? 'Je ne sais pas, conseillez-moi' : 'Peu importe, conseillez-moi'} desc={offrir ? 'Le sommelier choisit une valeur sûre, qui fait plaisir' : 'Le sommelier choisit la couleur qui va le mieux'} accent={true} onClick={() => pickCouleur(null)}/>
               </div>
-              <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:12}}>
+              <div className="ws-cascade" style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:12}}>
                 {TYPES.map(t => (
-                  <div key={t.id} onClick={() => pickCouleur(t.id)} style={{background:C.cream, border:'1px solid ' + C.bord, borderRadius:16, padding:'20px 14px', minHeight:120, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', textAlign:'center', cursor:'pointer', transition:'border-color .3s'}}
+                  <div key={t.id} onClick={() => pickCouleur(t.id)} className="ws-carte ws-tap" style={{background:'linear-gradient(180deg, #ffffff, #fffbf5)', border:'1px solid ' + C.bord, borderRadius:18, padding:'20px 14px', minHeight:124, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', textAlign:'center', cursor:'pointer', transition:'border-color .3s'}}
                     onMouseEnter={e => { e.currentTarget.style.borderColor = t.color; }}
                     onMouseLeave={e => { e.currentTarget.style.borderColor = C.bord; }}>
-                    <div style={{marginBottom:8, display:'flex', justifyContent:'center'}}><TypeIcon id={t.id} color={t.color} size={38}/></div>
+                    <div style={{marginBottom:10, display:'flex', justifyContent:'center'}}><Pastille taille={58} fond={'radial-gradient(circle at 35% 30%, #ffffff, ' + t.bg + ' 75%)'}><TypeIcon id={t.id} color={t.color} size={34}/></Pastille></div>
                     <div style={{...serif, fontSize:22, color:C.ink, fontWeight:600}}>{t.label}</div>
                     {occasion === 'repas' && conseils && conseils[t.id] === 'conseille' && (
                       <div style={{marginTop:8, background:C.wine, color:C.bg, borderRadius:999, padding:'4px 12px', ...capsIv(9, C.bg, {letterSpacing:'.12em', fontWeight:600})}}>Conseillé avec ce plat</div>
@@ -1662,7 +1836,7 @@ function Results({results, setView}) {
   const prix = p => String(p).replace('.', ',') + ' €';
 
   if (!results.length) return (
-    <div style={{minHeight:'var(--ecran, 100vh)', background:IV.bg, color:IV.ink}}>
+    <div style={{minHeight:'var(--ecran, 100vh)', background:'transparent', color:IV.ink}}>
       <div style={{textAlign:'center', padding:'90px 28px'}}>
         <h2 style={{...serif, fontSize:34, fontWeight:500, color:IV.ink, margin:'0 0 10px'}}>Aucun vin ne correspond</h2>
         <p style={{fontSize:14, color:IV.muted, marginBottom:26}}>Essayez un autre budget, ou décrivez votre plat au sommelier.</p>
@@ -1681,7 +1855,7 @@ function Results({results, setView}) {
   const nb = results.length;
 
   return (
-    <div style={{minHeight:'var(--ecran, 100vh)', background:IV.bg, color:IV.ink, paddingBottom:96}}>
+    <div style={{minHeight:'var(--ecran, 100vh)', background:'transparent', color:IV.ink, paddingBottom:96}}>
       {/* En-tête */}
       <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', padding:'22px 24px 18px', borderBottom:'1px solid '+IV.line}}>
         <button onClick={()=>setView('selection')} style={{...sans, display:'flex', alignItems:'center', gap:8, minHeight:46, padding:'0 18px 0 12px', background:'transparent', border:'1px solid '+IV.line2, borderRadius:999, color:IV.ink, fontSize:13, letterSpacing:'.04em', cursor:'pointer'}}>
@@ -1692,9 +1866,14 @@ function Results({results, setView}) {
         <div style={{width:96}}/>
       </div>
 
-      <div style={{padding:'0 24px'}}>
+      <div className="ws-entree" style={{padding:'0 24px'}}>
         {/* Titre */}
         <div style={{padding:'32px 0 0'}}>
+          {themeFetes() && results.avis && results.avis.occasion === 'offrir' && (
+            <div style={{display:'inline-flex', alignItems:'center', gap:8, marginBottom:14, padding:'7px 15px', borderRadius:999, background:'#f6eedd', border:'1px solid #d9c49a', ...caps(10.5, IV.gold, {fontWeight:600, letterSpacing:'.2em'})}}>
+              <EtoileFetes size={12} color={IV.gold}/>Idée cadeau pour les fêtes
+            </div>
+          )}
           <div style={caps(11, IV.gold, {letterSpacing:'.24em', marginBottom:10})}>Votre sélection</div>
           <h1 style={{...serif, margin:0, fontSize:'clamp(2.2rem,6vw,3.1rem)', fontWeight:500, lineHeight:1.04, letterSpacing:'-.01em', color:IV.ink}}>
             {nb===3 ? 'Trois vins choisis pour vous' : nb===2 ? 'Deux vins choisis pour vous' : 'Le vin choisi pour vous'}
@@ -1765,8 +1944,8 @@ function Results({results, setView}) {
 
         {/* Actions */}
         <div style={{marginTop:results.avis ? 12 : 28, display:'flex', gap:12, flexWrap:'wrap'}}>
-          <button onClick={()=>setView('home')} style={{...sans, flex:1, minWidth:200, minHeight:58, background:IV.wine, border:'none', borderRadius:999, color:IV.bg, fontSize:15, fontWeight:600, letterSpacing:'.03em', cursor:'pointer'}}>Nouvelle recherche</button>
-          <button onClick={()=>setView('chat')} style={{...sans, flex:1, minWidth:200, minHeight:58, background:'transparent', border:'1px solid '+IV.line2, borderRadius:999, color:IV.ink, fontSize:15, cursor:'pointer'}}>Demander au sommelier</button>
+          <button onClick={()=>setView('home')} className="ws-tap" style={{...sans, flex:1, minWidth:200, minHeight:58, background:'linear-gradient(135deg, #7a2232, #5e1622 55%, #4a0f1a)', border:'none', borderRadius:999, color:IV.bg, fontSize:15, fontWeight:600, letterSpacing:'.03em', cursor:'pointer', boxShadow:'0 14px 28px -12px rgba(94,22,34,.6), inset 0 0 0 1px rgba(216,189,132,.2)'}}>Nouvelle recherche</button>
+          <button onClick={()=>setView('chat')} className="ws-tap" style={{...sans, flex:1, minWidth:200, minHeight:58, background:'rgba(255,255,255,.55)', border:'1px solid '+IV.line2, borderRadius:999, color:IV.ink, fontSize:15, cursor:'pointer'}}>Demander au sommelier</button>
         </div>
       </div>
       {modal && <WineModal wine={modal} onClose={()=>setModal(null)}/>}
@@ -1793,19 +1972,21 @@ function Mystery({setView}) {
     </div>
   );
   return (
-    <div style={{minHeight:'var(--ecran, 100vh)', background:I.bg, color:I.ink}}>
+    <div style={{minHeight:'var(--ecran, 100vh)', background:'transparent', color:I.ink}}>
       <Header title="Choix mystère" onBack={()=>setView('home')}/>
       <div style={{...sans, textAlign:'center', padding:'clamp(40px,8vh,72px) 24px 120px', maxWidth:520, margin:'0 auto'}}>
         {!wine ? (
           <>
-            <div style={{width:120, height:120, margin:'0 auto 26px', borderRadius:'50%', border:'1px solid ' + I.bord2, background:I.cream, display:'flex', alignItems:'center', justifyContent:'center', animation:'float 4s ease-in-out infinite'}}>
-              <span style={{...serif, fontSize:60, color:I.wine, fontWeight:500, lineHeight:1}}>?</span>
+            <div style={{width:132, height:132, margin:'0 auto 26px', borderRadius:'50%', padding:4, background:'linear-gradient(145deg, #ecd5a2, #b08d4f 55%, #8a6a2e)', boxShadow:'0 22px 40px -18px rgba(94,22,34,.45)', animation:'float 4s ease-in-out infinite'}}>
+              <div style={{width:'100%', height:'100%', borderRadius:'50%', background:'radial-gradient(circle at 35% 30%, #ffffff, #f4e9d6 80%)', display:'flex', alignItems:'center', justifyContent:'center'}}>
+                <span style={{...serif, fontSize:64, color:I.wine, fontWeight:500, lineHeight:1}}>?</span>
+              </div>
             </div>
             <div style={capsIv(11, I.gold, {letterSpacing:'.3em', fontWeight:600})}>Laissez-vous surprendre</div>
             <h2 style={{...serif, fontSize:'clamp(2.4rem,7vw,3.2rem)', fontWeight:500, color:I.wine, margin:'10px 0 0', lineHeight:1.05}}>Choix mystère</h2>
             <Losange/>
             <p style={{color:I.body, margin:'0 auto 34px', lineHeight:1.7, fontSize:16, maxWidth:400}}>Un vin de notre rayon, tiré au sort entre 8 et 30 €, pour sortir de vos habitudes.</p>
-            <button onClick={reveal} style={{...sans, minHeight:58, padding:'0 40px', background:I.wine, color:I.bg, border:'none', borderRadius:999, fontSize:16, fontWeight:500, letterSpacing:'.03em', cursor:'pointer', boxShadow:'0 18px 40px rgba(94,22,34,.16)'}}>Révéler le vin</button>
+            <button onClick={reveal} className="ws-tap" style={{...sans, position:'relative', overflow:'hidden', minHeight:60, padding:'0 44px', background:'linear-gradient(135deg, #7a2232, #5e1622 55%, #4a0f1a)', color:I.bg, border:'none', borderRadius:999, fontSize:16, fontWeight:500, letterSpacing:'.03em', cursor:'pointer', boxShadow:'0 18px 34px -14px rgba(94,22,34,.6), inset 0 0 0 1px rgba(216,189,132,.22)'}}><span className="ws-reflet"/><span style={{position:'relative'}}>Révéler le vin</span></button>
           </>
         ) : (
           <div>
@@ -1868,7 +2049,7 @@ function Chat({setView}) {
   const peutEnvoyer = !!input.trim() && !loading;
 
   return (
-    <div style={{display:'flex', flexDirection:'column', height:'calc(var(--ecran, 100vh) - 34px)', background:I.bg, color:I.ink}}>
+    <div style={{display:'flex', flexDirection:'column', height:'calc(var(--ecran, 100vh) - 34px)', background:'transparent', color:I.ink}}>
       <style>{'@keyframes pulseIv{0%,100%{box-shadow:0 0 0 0 rgba(94,22,34,.35)}50%{box-shadow:0 0 0 10px rgba(94,22,34,0)}}@keyframes pointIv{0%,80%,100%{opacity:.25}40%{opacity:1}}'}</style>
       <EnteteIvoire onBack={()=>setView('home')}/>
 
@@ -1882,14 +2063,14 @@ function Chat({setView}) {
           {msgs.map((m,i)=>(
             <div key={i} style={{display:'flex', flexDirection:'column', alignItems:m.role==='user'?'flex-end':'flex-start'}}>
               {m.role==='assistant' && <div style={capsIv(10, I.muted, {letterSpacing:'.2em', fontWeight:600, margin:'0 0 7px 4px'})}>Le sommelier</div>}
-              <div style={{...sans, maxWidth:'86%', background:m.role==='user'?I.wine:I.cream, color:m.role==='user'?I.bg:I.body, border:m.role==='user'?'none':'1px solid ' + I.bord, borderRadius:m.role==='user'?'20px 20px 6px 20px':'6px 20px 20px 20px', padding:'14px 18px', fontSize:16, lineHeight:1.65, whiteSpace:'pre-wrap'}}>
+              <div className="ws-carte" style={{...sans, maxWidth:'86%', background:m.role==='user'?'linear-gradient(135deg, #7a2232, #5e1622 60%, #4a0f1a)':'linear-gradient(180deg, #ffffff, #fffbf5)', color:m.role==='user'?I.bg:I.body, border:m.role==='user'?'none':'1px solid ' + I.bord, borderRadius:m.role==='user'?'20px 20px 6px 20px':'6px 20px 20px 20px', padding:'14px 18px', fontSize:16, lineHeight:1.65, whiteSpace:'pre-wrap'}}>
                 {m.role==='assistant' ? m.text.replace(/^(?:🥇|⭐|✨)\uFE0F?\s*/gmu, '') : m.text}
               </div>
 
               {m.wines && m.wines.length>0 && (
                 <div style={{width:'100%', marginTop:12, display:'flex', flexDirection:'column', gap:10}}>
                   {m.wines.map((w,wi)=>(
-                    <div key={w.id} style={{background:I.cream, border:'3px solid ' + ((couleurVin(w)||{}).teinte||I.bord), borderRadius:18, overflow:'hidden'}}>
+                    <div key={w.id} className="ws-carte" style={{background:I.cream, border:'3px solid ' + ((couleurVin(w)||{}).teinte||I.bord), borderRadius:18, overflow:'hidden'}}>
                       <div onClick={()=>{ setModal(w); noterUsage('fiche', {mode:'chat', vin:w.id}); }} style={{display:'flex', gap:16, alignItems:'center', padding:'16px 18px', cursor:'pointer'}}>
                         <div style={{width:64, minHeight:120, flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center', borderRadius:10, background:(couleurVin(w)||{}).fond||I.bg}}><PhotoVin wine={w} h={110}/></div>
                         <div style={{flex:1, minWidth:0}}>
@@ -1915,10 +2096,10 @@ function Chat({setView}) {
           ))}
 
           {msgs.length===1 && !loading && (
-            <div style={{display:'flex', flexWrap:'wrap', gap:10, marginTop:2}}>
+            <div className="ws-cascade" style={{display:'flex', flexWrap:'wrap', gap:10, marginTop:2}}>
               {suggestions.map(s=>(
-                <button key={s} onClick={()=>send(s)}
-                  style={{...sans, minHeight:48, padding:'0 18px', background:'transparent', border:'1px solid ' + I.bord2, borderRadius:999, color:I.ink, fontSize:14, cursor:'pointer'}}>{s}</button>
+                <button key={s} onClick={()=>send(s)} className="ws-tap"
+                  style={{...sans, minHeight:48, padding:'0 18px', background:'rgba(255,255,255,.6)', boxShadow:'0 6px 14px -10px rgba(94,22,34,.35)', border:'1px solid ' + I.bord2, borderRadius:999, color:I.ink, fontSize:14, cursor:'pointer'}}>{s}</button>
               ))}
             </div>
           )}
@@ -1944,8 +2125,8 @@ function Chat({setView}) {
         </div>
       )}
 
-      <div style={{flexShrink:0, borderTop:'1px solid ' + I.bord, background:I.cream}}>
-        <div style={{maxWidth:680, margin:'0 auto', display:'flex', gap:10, padding:'14px 20px', alignItems:'center'}}>
+      <div style={{flexShrink:0, padding:'0 12px 10px'}}>
+        <div style={{maxWidth:680, margin:'0 auto', display:'flex', gap:10, padding:'12px 14px', alignItems:'center', background:'rgba(255,253,248,.82)', border:'1px solid #eadcc3', borderRadius:24, boxShadow:'0 -6px 24px -14px rgba(94,22,34,.25), 0 10px 24px -16px rgba(94,22,34,.3)'}}>
           <button onClick={toggle} aria-label={mic==='listening' ? 'Envoyer la dictée' : 'Parler au sommelier'}
             style={{width:54, height:54, borderRadius:'50%', border:'1px solid ' + (mic==='off' ? I.bord2 : I.wine), cursor:'pointer', flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center', background:mic==='listening' ? I.wine : mic==='speaking' ? I.soft : I.cream, color:mic==='listening' ? I.bg : I.wine, animation:mic==='listening' ? 'pulseIv 1.6s ease-in-out infinite' : 'none'}}>
             {mic==='listening' ? <IconeValider/> : mic==='speaking' ? <IconeSon/> : <IconeMicro/>}
@@ -1978,16 +2159,14 @@ function AgeGate({onConfirm}) {
   const I = C_IVOIRE;
   const sans = {fontFamily:'Montserrat,sans-serif'};
   const [refused, setRefused] = useState(false);
+  const fetes = themeFetes();
   return (
-    <div style={{...sans, minHeight:'var(--ecran, 100vh)', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:'24px 24px 80px', background:I.bg, color:I.ink, textAlign:'center'}}>
+    <div style={{...sans, minHeight:'var(--ecran, 100vh)', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:'24px 24px 80px', background:'transparent', color:I.ink, textAlign:'center', position:'relative'}} className="ws-entree">
       <div style={capsIv(11, I.gold, {letterSpacing:'.34em', fontWeight:600, marginBottom:14})}>Cave &amp; Sélection</div>
       <div style={{...serif, fontSize:'clamp(3rem,10vw,4.4rem)', fontWeight:500, color:I.wine, lineHeight:.95, letterSpacing:'-.02em'}}>WineSelect</div>
-      <div style={{display:'flex', alignItems:'center', justifyContent:'center', gap:12, margin:'22px auto 40px'}}>
-        <span style={{width:56, height:1, background:I.bord2}}/>
-        <span style={{width:6, height:6, transform:'rotate(45deg)', background:I.gold}}/>
-        <span style={{width:56, height:1, background:I.bord2}}/>
-      </div>
-      <div style={{maxWidth:440, width:'100%', background:I.cream, border:'1px solid ' + I.bord, borderRadius:24, padding:'34px 28px'}}>
+      <Separateur I={I} marge={fetes ? '22px auto 0' : '22px auto 40px'}/>
+      {fetes && <p style={{...serif, fontStyle:'italic', fontSize:22, color:I.body, margin:'16px 0 34px', position:'relative', zIndex:1}}>Le sommelier de vos fêtes</p>}
+      <div className="ws-carte" style={{maxWidth:440, width:'100%', background:'linear-gradient(180deg, #ffffff, #fffaf2)', border:'1px solid #eadcc3', borderRadius:26, padding:'36px 30px', position:'relative', zIndex:1}}>
         {refused ? (
           <div>
             <div style={{...serif, fontSize:28, fontWeight:500, color:I.wine, marginBottom:10}}>Accès réservé aux adultes</div>
@@ -1999,8 +2178,8 @@ function AgeGate({onConfirm}) {
             <div style={{...serif, fontSize:30, fontWeight:500, color:I.wine, marginBottom:10, lineHeight:1.15}}>Avez-vous 18 ans ou plus ?</div>
             <p style={{fontSize:15, color:I.body, lineHeight:1.7, margin:'0 0 26px'}}>Cet espace présente des boissons alcoolisées. La vente d'alcool est interdite aux mineurs.</p>
             <div style={{display:'flex', gap:10}}>
-              <button onClick={onConfirm} style={{...sans, flex:1.6, minHeight:58, background:I.wine, color:I.bg, border:'none', borderRadius:999, cursor:'pointer', fontSize:15, fontWeight:500}}>Oui, j'ai 18 ans ou plus</button>
-              <button onClick={()=>setRefused(true)} style={{...sans, flex:1, minHeight:58, background:'transparent', color:I.wine, border:'1px solid ' + I.bord2, borderRadius:999, cursor:'pointer', fontSize:15}}>Non</button>
+              <button onClick={onConfirm} className="ws-tap" style={{...sans, flex:1.6, minHeight:58, background:'linear-gradient(135deg, #7a2232, #5e1622 55%, #4a0f1a)', color:I.bg, border:'none', borderRadius:999, cursor:'pointer', fontSize:15, fontWeight:500, boxShadow:'0 14px 28px -12px rgba(94,22,34,.6), inset 0 0 0 1px rgba(216,189,132,.2)'}}>Oui, j'ai 18 ans ou plus</button>
+              <button onClick={()=>setRefused(true)} className="ws-tap" style={{...sans, flex:1, minHeight:58, background:'transparent', color:I.wine, border:'1px solid ' + I.bord2, borderRadius:999, cursor:'pointer', fontSize:15}}>Non</button>
             </div>
           </div>
         )}
@@ -2175,6 +2354,12 @@ function App() {
     if (ECRANS[view]) noterUsage('ecran', {ecran: ECRANS[view]});
   }, [view]);
   const [results, setResults] = useState([]);
+  // Point de départ du parcours guidé ('noel' : raccourci « Menu des fêtes » de l'accueil).
+  // Effacé dès qu'on quitte le parcours : « Nouvelle recherche » repart de l'occasion.
+  const [depart, setDepart] = useState(null);
+  useEffect(() => { if (view !== 'selection') setDepart(null); }, [view]);
+  // Chaque écran s'affiche depuis le haut (ex. « Nouvelle recherche » après des résultats défilés)
+  useEffect(() => { window.scrollTo(0, 0); }, [view]);
 
   // ── Réinitialisation automatique entre deux clients ──────────────────────
   // Après un temps d'inactivité (aucun clic/toucher/touche), on revient à
@@ -2227,17 +2412,21 @@ function App() {
   const [ageOk, setAgeOk] = useState(()=>{ try{ return sessionStorage.getItem('ws_age_ok')==='1'; }catch(e){ return false; } });
   if (!ageOk) {
     return (
-      <div style={{maxWidth:680, margin:'0 auto', fontFamily:'Montserrat,sans-serif'}}>
+      <div style={{maxWidth:680, margin:'0 auto', fontFamily:'Montserrat,sans-serif', position:'relative', zIndex:1}}>
+        <StylesGlobaux/>
+        <Decor flocons={themeFetes()}/>
         <AgeGate onConfirm={()=>{ try{ sessionStorage.setItem('ws_age_ok','1'); }catch(e){} debuterSession(); setAgeOk(true); }}/>
         <SanteBanner/>
       </div>
     );
   }
   return (
-    <div style={{maxWidth:680, margin:'0 auto', fontFamily:'Montserrat,sans-serif'}}>
+    <div style={{maxWidth:680, margin:'0 auto', fontFamily:'Montserrat,sans-serif', position:'relative', zIndex:1}}>
+      <StylesGlobaux/>
+      <Decor flocons={themeFetes() && view === 'home'}/>
       <style>{'@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-10px)}}@keyframes shimmer{0%{background-position:-200% 0}100%{background-position:200% 0}}*{box-sizing:border-box}::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:rgba(212,175,55,.35);border-radius:2px}'}</style>
-      {view==='home'      && <Home          setView={setView}/>}
-      {view==='selection' && <Selection     setView={setView} setResults={setResults}/>}
+      {view==='home'      && <Home          setView={setView} ouvrirFetes={()=>{ setDepart('noel'); setView('selection'); }}/>}
+      {view==='selection' && <Selection     setView={setView} setResults={setResults} depart={depart}/>}
       {view==='results'   && <Results       setView={setView} results={results}/>}
       {view==='mystery'   && <Mystery       setView={setView}/>}
       {view==='chat'      && <Chat          setView={setView}/>}
@@ -2246,7 +2435,7 @@ function App() {
         <button
           onClick={()=>{ terminerSession('termine'); setResults([]); setView('home'); try{ sessionStorage.removeItem('ws_age_ok'); }catch(e){} setAgeOk(false); }}
           style={{position:'fixed', ...(view==='chat' ? {top:22} : {bottom:56}), right:'max(20px, calc(50% - 316px))', zIndex:50, minHeight:46, background:view==='chat' ? '#ffffff' : C.wine, color:view==='chat' ? C.wine : '#faf6ee', border:'1px solid ' + C.wine, borderRadius:999, padding:'0 22px', fontSize:13, fontWeight:500, letterSpacing:'.03em', cursor:'pointer', boxShadow:view==='chat' ? 'none' : '0 12px 30px rgba(94,22,34,.22)', fontFamily:'Montserrat,sans-serif'}}
-        >J'ai terminé</button>
+         className="ws-tap">J'ai terminé</button>
       )}
       <div style={{height:34}}/>
       <SanteBanner/>
