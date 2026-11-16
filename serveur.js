@@ -59,7 +59,7 @@ function loadApiKey() {
 
 const CONFIG = {
   apiKey : loadApiKey(),
-  model  : 'mistral-large-latest',
+  model  : 'mistral-large-2512', // version figée, comme MISTRAL_MODELE du serveur central
 };
 
 // En mode connecté, la clé Mistral est sur le serveur central : aucune ici.
@@ -161,8 +161,8 @@ app.post('/api/admin-auth', (req, res) => {
 });
 
 // Le dossier de la borne est servi tel quel (WineSelect.html, wines-data.js...), mais
-// jamais ses secrets ni ses données : la clé API, le PIN admin, data/ (profils
-// clients, prix d'achat...), les sauvegardes et les outils. Sans ce filtre, n'importe
+// jamais ses secrets ni ses données : la clé API, le PIN admin, data/,
+// les sauvegardes et les outils. Sans ce filtre, n'importe
 // quel appareil du réseau du magasin pouvait lire http://<borne>:3000/api-key.txt.
 // Mode connecté (2026-10) : aussi le jeton de la borne, sa copie du catalogue
 // central, et le serveur central lui-même (sa configuration .env contient la clé
@@ -189,8 +189,8 @@ app.use((req, res, next) => {
       'window.WINES_DATA = ' + JSON.stringify(BASE_CATALOG) + ';\n');
   });
   // L'administration se fait désormais dans l'espace de gestion en ligne :
-  // la borne ne garde plus de stocks, prix d'achat ni stratégie à elle.
-  const LECTURE_VIDE = { '/api/stock-overrides': [], '/api/config-reco': { strategie: 'neutre' }, '/api/prix-achat': {} };
+  // la borne ne garde plus de stocks ni de stratégie à elle.
+  const LECTURE_VIDE = { '/api/stock-overrides': [], '/api/config-reco': { strategie: 'neutre' } };
   app.use(Object.keys(LECTURE_VIDE), (req, res, next) => {
     if (!CONNEXION) return next();
     if (req.method === 'GET') return res.json(LECTURE_VIDE[req.baseUrl]);
@@ -242,7 +242,7 @@ setInterval(() => {
 }, 10 * 60 * 1000).unref();
 
 // ── Persistance serveur (data/*.json) ───────────────────────────────────────
-// Données de la borne en mode autonome (stocks importés, stratégie, prix d'achat,
+// Données de la borne en mode autonome (stocks importés, stratégie,
 // réponses de satisfaction et mesures d'usage). Aucune donnée sur les clients.
 // (WINESELECT_DONNEES : autre dossier, pour les tests.)
 const DATA_DIR = path.resolve(process.env.WINESELECT_DONNEES || path.join(__dirname, 'data'));
@@ -252,11 +252,12 @@ function dataFile(name) { return path.join(DATA_DIR, name + '.json'); }
 
 // Comptes clients supprimés (novembre 2026) : les anciens profils (numéros de
 // carte, cave) et notes des clients encore présents sur la borne sont effacés
-// au démarrage. Rien ne les recrée.
-for (const nom of ['profiles', 'global-ratings']) {
+// au démarrage. Rien ne les recrée. Même chose pour les prix d'achat (supprimés
+// de WineSelect en novembre 2026).
+for (const nom of ['profiles', 'global-ratings', 'prix-achat']) {
   for (const fichier of [dataFile(nom), dataFile(nom) + '.tmp']) {
     try {
-      if (fs.existsSync(fichier)) { fs.unlinkSync(fichier); console.log('🧹 Ancien fichier client effacé : data/' + path.basename(fichier)); }
+      if (fs.existsSync(fichier)) { fs.unlinkSync(fichier); console.log('🧹 Ancien fichier effacé : data/' + path.basename(fichier)); }
     } catch (e) { console.warn('⚠️  ' + path.basename(fichier) + ' non effacé :', e.message); }
   }
 }
@@ -310,38 +311,13 @@ makePersistedRoute('stock-overrides', {
 // Lecture libre (rien de sensible), écriture réservée à l'admin.
 makePersistedRoute('config-reco', { protect: true, defaultValue: { strategie: 'neutre' } });
 
-// prix-achat : { id: prix d'achat HT ou TTC, au choix du magasin, tant que c'est
-// cohérent }. Donnée confidentielle : lecture ET écriture réservées à l'admin
-// (contrairement à makePersistedRoute, dont la lecture est libre), jamais copiée
-// dans le navigateur, jamais envoyée à Mistral. Sert au tri « marge » et à
-// l'affichage de la marge dans Admin > Catalogue.
-// POST = fusion : { id: prix } ajoute ou remplace, { id: null } efface.
-app.get('/api/prix-achat', requireAdminToken, (req, res) => res.json(readJSON('prix-achat', {}) || {}));
-app.post('/api/prix-achat', requireAdminToken, (req, res) => {
-  try {
-    const actuel = readJSON('prix-achat', {}) || {};
-    const maj = (req.body && typeof req.body === 'object') ? req.body : {};
-    Object.keys(maj).forEach(id => {
-      const v = maj[id];
-      if (v === null) delete actuel[id];
-      else if (typeof v === 'number' && v > 0 && v < 100000) actuel[id] = Math.round(v * 100) / 100;
-    });
-    writeJSONAtomic('prix-achat', actuel);
-    res.json({ ok: true, total: Object.keys(actuel).length });
-  } catch (e) {
-    console.error('❌ Écriture data/prix-achat.json impossible :', e.message);
-    res.status(500).json({ ok: false, error: e.message });
-  }
-});
-
 // Objectif commercial du magasin, lu à chaque demande (fichiers minuscules) :
-// { strategie, prixAchat }. Sert UNIQUEMENT au départage côté serveur (voir
+// { strategie }. Sert UNIQUEMENT au départage côté serveur (voir
 // bonusStrategie dans accords.js) : jamais envoyé à Mistral ni à l'écran client.
 function lireCommercial() {
   const conf = readJSON('config-reco', { strategie: 'neutre' }) || {};
-  const strategie = ['neutre', 'panier', 'marge', 'stock'].includes(conf.strategie) ? conf.strategie : 'neutre';
-  const prixAchat = strategie === 'marge' ? (readJSON('prix-achat', {}) || {}) : {};
-  return { strategie, prixAchat };
+  const strategie = ['neutre', 'panier', 'stock'].includes(conf.strategie) ? conf.strategie : 'neutre';
+  return { strategie };
 }
 
 // ── Chargement du catalogue ───────────────────────────────────────────────────

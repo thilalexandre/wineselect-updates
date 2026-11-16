@@ -8,9 +8,8 @@
 //  couleurs conseillées, profils des vins, appel à l'API Mistral.
 //  Ce module ne connaît ni Express ni les fichiers du magasin : chaque fonction
 //  reçoit un « env » = { catalogue, commercial, config } et renvoie sa réponse.
-//    catalogue  : les vins du magasin (prix et stocks à jour, sans prix d'achat
-//                 sauf dans commercial.prixAchat pour la stratégie « marge »)
-//    commercial : { strategie, prixAchat } (départage seulement, jamais envoyé à Mistral)
+//    catalogue  : les vins du magasin (prix et stocks à jour)
+//    commercial : { strategie } (départage seulement, jamais envoyé à Mistral)
 //    config     : { apiKey, model } pour Mistral
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -22,7 +21,7 @@ let ACCORDS = null;
 try { ACCORDS = require('./accords.js'); }
 catch (e) { console.warn('⚠️  accords.js absent : tri par catégorie uniquement (' + e.message + ')'); }
 
-const COMMERCIAL_NEUTRE = { strategie: 'neutre', prixAchat: {} };
+const COMMERCIAL_NEUTRE = { strategie: 'neutre' };
 
 // ── Identité des vins (libellé) ─────────────────────────────────────────────
 // Même règle que libelleVin() dans WineSelect.html — les deux doivent rester

@@ -363,26 +363,20 @@ const precisionCompromis = col => col === 'rouge' ? ' (légers, tanins souples, 
 // également accordés. Elle ajoute au plus BONUS_STRATEGIE_MAX points, alors qu'un
 // cran de pertinence (« Bon accord » → « Très bon accord ») en vaut 13 : elle ne
 // fait jamais passer un vin moins bien accordé devant un meilleur accord net.
-// Elle n'influence que la liste envoyée au sommelier, jamais son argumentaire, et
-// aucune donnée de marge ou de prix d'achat n'est jamais transmise à Mistral.
+// Elle n'influence que la liste envoyée au sommelier, jamais son argumentaire.
 //   neutre : aucun départage commercial (défaut)
 //   panier : le haut de la fourchette de prix
-//   marge  : la marge brute en euros la plus élevée (prix - prix d'achat) ;
-//            un vin sans prix d'achat connu n'a simplement pas de bonus
 //   stock  : les stocks les plus élevés
-const STRATEGIES = ['neutre', 'panier', 'marge', 'stock'];
+const STRATEGIES = ['neutre', 'panier', 'stock'];
 const BONUS_STRATEGIE_MAX = 4;
-// commercial = { strategie, prixAchat: { id: prix } } → fonction vin → bonus (0 à 4),
-// calculée relativement aux vins du vivier (le plus cher, le plus margé... reçoit 4).
+// commercial = { strategie } → fonction vin → bonus (0 à 4),
+// calculée relativement aux vins du vivier (le plus cher, le plus gros stock... reçoit 4).
 function bonusStrategie(commercial, vins) {
   const strategie = commercial && STRATEGIES.includes(commercial.strategie) ? commercial.strategie : 'neutre';
   if (strategie === 'neutre' || !vins.length) return () => 0;
-  const prixAchat = (commercial && commercial.prixAchat) || {};
   const valeur = w => {
     if (strategie === 'panier') return w.price;
-    if (strategie === 'stock') return typeof w.stock === 'number' ? w.stock : null;
-    const pa = prixAchat[w.id];
-    return typeof pa === 'number' && pa > 0 ? w.price - pa : null;
+    return typeof w.stock === 'number' ? w.stock : null;
   };
   const vals = new Map();
   vins.forEach(w => { const v = valeur(w); if (v !== null && !isNaN(v)) vals.set(w.id, v); });
@@ -390,13 +384,13 @@ function bonusStrategie(commercial, vins) {
   const min = Math.min(...vals.values()), max = Math.max(...vals.values());
   if (max === min) return () => 0;
   const bonus = v => BONUS_STRATEGIE_MAX * (v - min) / (max - min);
-  // Vin sans donnée (ex. prix d'achat non renseigné) : ni avantagé ni pénalisé,
+  // Vin sans donnée (ex. stock non renseigné) : ni avantagé ni pénalisé,
   // il reçoit le bonus moyen des vins renseignés.
   const moyen = [...vals.values()].reduce((s, v) => s + bonus(v), 0) / vals.size;
   return w => vals.has(w.id) ? bonus(vals.get(w.id)) : moyen;
 }
 // Consigne ajoutée au prompt quand une stratégie est active : seul l'ORDRE de la liste
-// porte la préférence du magasin (aucune donnée de marge, de stock ni de prix d'achat).
+// porte la préférence du magasin (aucune donnée de stock).
 function consigneOrdre(commercial) {
   if (!commercial || !STRATEGIES.includes(commercial.strategie) || commercial.strategie === 'neutre') return '';
   return '\nLes vins de chaque liste sont classés par ordre de préférence du magasin. À accord ÉGAL, préfère les premiers de la liste ; ' +
