@@ -1029,16 +1029,22 @@ function candidatsGuides(wines, demande) {
   // Filet de sécurité : jamais moins de 3 vins. Si la tranche est trop pauvre pour ce plat,
   // on prend les mieux accordés MOINS CHERS que la tranche (le client en est averti) :
   // on ne dépasse jamais le plafond du client.
+  // Priorité aux vins proches du budget (au moins 70 % du minimum), classés par accord ;
+  // au-delà, le plus proche du budget d'abord. Sans cela, « 50 € et plus » sur un rayon
+  // qui n'a que 2 rouges à ce prix ajoutait le meilleur accord du rayon… à 7,88 €.
   let horsBudget = false;
   if (retenus.length < 3) {
     const deja = new Set(notes.map(n => n.wine.id));
     const plafond = ouvert ? Infinity : budget.max;
     const cible = budget.min;
+    const proche = n => n.wine.price >= cible * 0.7;
     const extra = wines
       .filter(w => !deja.has(w.id) && w.price <= plafond && (couleurOk(w) || compromis))
       .map(w => Object.assign({ wine: w }, noter(w)))
       .filter(n => n.score >= REGLAGES.seuilAcceptable)
-      .sort((a, b) => (b.score - a.score) || (Math.abs(a.wine.price - cible) - Math.abs(b.wine.price - cible)))
+      .sort((a, b) => (proche(b) - proche(a)) ||
+        (proche(a) ? (b.score - a.score) || (Math.abs(a.wine.price - cible) - Math.abs(b.wine.price - cible))
+                   : (Math.abs(a.wine.price - cible) - Math.abs(b.wine.price - cible)) || (b.score - a.score)))
       .slice(0, 3 - retenus.length);
     if (extra.length) {
       horsBudget = true;
