@@ -49,7 +49,7 @@ const PROMPT_ANALYSE =
   '  "present": true si un plat, un aliment ou un moment de repas précis est évoqué, sinon false,\n' +
   '  "plat": "nom court du plat",\n' +
   '  "proteine": "' + LISTES.proteine.join('|') + '",\n' +
-  '  "cuisson": "' + LISTES.cuisson.join('|') + '",\n' +
+  '  "cuisson": "' + LISTES.cuisson.join('|') + '" (cuisson non précisée : la plus courante pour ce plat, ex. un pavé de saumon est poêlé ; "cru" seulement pour un plat vraiment cru ou fumé),\n' +
   '  "sauce": "' + LISTES.sauce.join('|') + '",\n' +
   '  "corps": 1 léger, 2 moyen, 3 riche et puissant,\n' +
   '  "gras": 0 à 3,\n' +
@@ -57,7 +57,7 @@ const PROMPT_ANALYSE =
   '  "sucre": 0 aucun, 1 sucré-salé (teriyaki, canard à l\'orange, miel), 2 dessert peu sucré, 3 dessert très sucré,\n' +
   '  "epice": 0 à 3 (piquant : piment, poivre fort),\n' +
   '  "aromatique": 0 à 3 (épices parfumées, herbes, gingembre, citronnelle, curry doux),\n' +
-  '  "iode": 0 à 3 (huîtres, coquillages, algues),\n' +
+  '  "iode": 0 à 3 (huîtres, coquillages, algues ; un poisson cuit, même de mer, vaut 0 ou 1),\n' +
   '  "sousbois": 0 à 3 (champignons, truffe, noix, fromages affinés),\n' +
   '  "intensite": 1 à 3 (intensité de goût globale),\n' +
   '  "affinite_moelleux": true si un vin moelleux peut classiquement l\'accompagner (foie gras, bleu, cuisine épicée ou sucrée-salée), sinon false,\n' +
@@ -93,6 +93,11 @@ function nettoyer(d) {
   const s = v => String(v || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
   const dans = (v, liste, def) => { const x = s(v); return liste.map(s).includes(x) ? x : def; };
   const couleur = d.couleur_demandee ? String(d.couleur_demandee).toLowerCase().replace('rose', 'rosé').replace('roséé', 'rosé') : null;
+  // Poisson cuit : jamais « iodé » comme une huître (l'IA notait iode 2 un poisson grillé ou un
+  // saumon, et le moteur traitait la demande de rouge comme sur du cru : test du 17 nov. 2026)
+  const poissonCuit = dans(d.proteine, LISTES.proteine, 'aucun') === 'poisson' &&
+    ['vapeur', 'poche', 'grille', 'roti', 'poele', 'frit', 'mijote', 'gratine'].includes(dans(d.cuisson, LISTES.cuisson, 'aucune'));
+  if (poissonCuit) d = Object.assign({}, d, { iode: Math.min(1, parseInt(d.iode, 10) || 0) });
   return {
     present: d.present !== false,
     plat: String(d.plat || '').slice(0, 80),
@@ -205,6 +210,10 @@ function noterVin(wine, d) {
       const leger = p.fraicheur === 3 || p.corps === 1;
       add(leger ? -5 : -20, leger ? null : 'rouge encore trop présent pour la mer');
       if (leger) plus.push('rouge léger à tanins souples, à servir frais (12-14 °C)');
+      // Client qui veut du rouge sur un poisson cuit : on respecte son choix, un rouge léger
+      // y est un vrai accord (pas un compromis). Avant, sur un poisson grillé, les rouges légers
+      // restaient sous le seuil et le sommelier proposait 3 blancs (test du 17 nov. 2026).
+      if (leger && d.couleur_demandee === 'rouge') add(15, null);
     }
     if (d.epice >= 2 && p.tanins >= 2) add(-20, 'tanins exacerbés par le piquant');
     if (d.epice >= 2 && p.boise === 2) add(-8, 'boisé qui chauffe avec les épices');
@@ -443,12 +452,14 @@ function construireCandidats(wines, d, budget, featuredSet, texteClient, aleatoi
   }
   notes.sort((a, b) => (b.score + bonusSel(b.wine)) - (a.score + bonusSel(a.wine)));
   const parId = new Map(notes.map(n => [n.wine.id, n]));
-  const bonusGarde = n => (compromis && n.wine.type === compromis.couleur) ? 30 : 0;
+  // Vins de la couleur imposée (compromis) : toujours en tête de liste, quelle que soit leur note,
+  // sinon des blancs bien mieux notés les poussent hors des candidats (huîtres + rouge → 3 blancs)
+  const bonusGarde = n => (compromis && n.wine.type === compromis.couleur) ? 1000 : 0;
 
   // Vivier : voir vivier() — jamais de vin mal accordé pour compléter la liste
   const compatibles = lst => vivier(lst, compromis ? compromis.couleur : null);
 
-  let tierWines = null, available, fenetre;
+  let tierWines = null, available, fenetre, sousBudget = false;
 
   if (budget && !compromis) {
     const ref = budget.ref || budget.max;
@@ -467,7 +478,11 @@ function construireCandidats(wines, d, budget, featuredSet, texteClient, aleatoi
       pool.filter(n => n.wine.price >= cut2),
     ];
     tierWines = tiers.map((target, i) => {
-      const cands = bandes[i].length ? bandes[i] : pool;
+      // Bande vide : celle du dessous pour ✨ (les plus chers du vivier), celle du dessus pour 🥇,
+      // jamais tout le vivier (sinon ✨ recevait des vins moins chers que ⭐ et le sommelier
+      // rendait des prix dans le désordre : bar poêlé, « 20 € et plus », 19 € → 29 € → 22 €).
+      const voisine = i === 2 ? (bandes[1].length ? bandes[1] : bandes[0]) : i === 0 ? (bandes[1].length ? bandes[1] : bandes[2]) : pool;
+      const cands = bandes[i].length ? bandes[i] : voisine.length ? voisine : pool;
       const bonusCom = bonusStrategie(commercial, cands.map(n => n.wine));
       // 🥇 = belle affaire : le meilleur accord à prix doux (le moins cher départage) ;
       // ⭐ et ✨ : les mieux accordés autour du cœur puis du haut de la fourchette.
@@ -487,11 +502,21 @@ function construireCandidats(wines, d, budget, featuredSet, texteClient, aleatoi
     fenetre = notes.filter(n => dansBande(n, budget.min * 0.95));
     let pool = compatibles(fenetre);
     if (pool.length < 3) { fenetre = notes.filter(n => dansBande(n, (budget.ref || budget.max) * 0.55)); pool = compatibles(fenetre); }
+    // Aucun vin de la couleur demandée dans la fourchette (ex. huîtres + rouge à 40 € : le rouge
+    // très léger le plus cher du rayon coûte 21 €) : on descend sous la fourchette pour elle,
+    // jamais au-dessus du plafond, les plus proches du budget d'abord.
+    if (!pool.some(n => n.wine.type === compromis.couleur)) {
+      const gardes = notes.filter(n => n.wine.type === compromis.couleur && n.wine.price <= ceiling)
+        .sort((a, b) => b.wine.price - a.wine.price).slice(0, 2);
+      if (gardes.length) { pool = gardes.concat(pool); fenetre = fenetre.concat(gardes); sousBudget = true; }
+    }
     available = departager(pool, commercial, n => bonusGarde(n) + bonusSel(n.wine)).slice(0, 15).map(n => n.wine);
   } else {
     const plafond = PREMIUM.test(texteClient || '') ? Infinity : REGLAGES.prixMaxSansBudget;
     fenetre = notes.filter(n => n.wine.price <= plafond);
-    available = departager(compatibles(fenetre), commercial, n => bonusSel(n.wine)).slice(0, 15).map(n => n.wine);
+    // (bonusGarde : en compromis couleur, les vins de la couleur demandée restent en tête ;
+    //  sans lui, les blancs les poussaient hors des 15 candidats et le client n'avait que des blancs)
+    available = departager(compatibles(fenetre), commercial, n => bonusGarde(n) + bonusSel(n.wine)).slice(0, 15).map(n => n.wine);
   }
 
   // Rien d'utilisable dans le budget : jamais de liste vide (sinon le sommelier pioche dans
@@ -505,6 +530,28 @@ function construireCandidats(wines, d, budget, featuredSet, texteClient, aleatoi
     const sousPlafond = notes.filter(n => n.wine.price <= plafond);
     fenetre = compatibles(sousPlafond).length ? sousPlafond : notes;
     available = compatibles(fenetre).slice(0, 15).map(n => n.wine);
+  }
+
+  // Moins de 3 vins dans la fourchette (ex. un rosé avec du bœuf autour de 40 € : un seul au
+  // rayon) : on complète par les mieux accordés MOINS CHERS, au moins 70 % du minimum d'abord,
+  // comme le filet de sécurité du parcours guidé. Avant, le sommelier n'avait qu'un candidat.
+  if (budget && available.length < 3) {
+    const plafond = budget.max * (budget.strict ? 1.0 : 1.05);
+    const cible = budget.min;
+    const proche = n => n.wine.price >= cible * 0.7;
+    const deja = new Set(available.map(w => w.id));
+    const extra = notes
+      .filter(n => !deja.has(n.wine.id) && n.wine.price <= plafond && n.score >= REGLAGES.seuilAcceptable &&
+        (!d.couleur_demandee || compromis || n.wine.type === d.couleur_demandee))
+      .sort((a, b) => (proche(b) - proche(a)) ||
+        (proche(a) ? (b.score - a.score) : (b.wine.price - a.wine.price)))
+      .slice(0, 3 - available.length);
+    if (extra.length) {
+      sousBudget = true;
+      available = available.concat(extra.map(n => n.wine));
+      if (tierWines) tierWines[0] = tierWines[0].concat(extra.map(n => n.wine));   // moins chers : palier 🥇
+      fenetre = (fenetre || []).concat(extra);
+    }
   }
 
   // Découverte : un vin d'une autre couleur, seulement si l'accord est excellent
@@ -523,7 +570,7 @@ function construireCandidats(wines, d, budget, featuredSet, texteClient, aleatoi
     decouverte = dec.wine; // déjà présent dans la liste : on le signale simplement
   }
 
-  return { tierWines, available, decouverte, notes: parId, compromis, horsBudget };
+  return { tierWines, available, decouverte, notes: parId, compromis, horsBudget, sousBudget };
 }
 
 // Ligne d'un candidat dans le prompt du sommelier
@@ -1164,6 +1211,9 @@ async function preparerSommelier(env) {
   }
   if (budget && c.horsBudget) {
     inject += '\nAUCUN vin adapté à ce plat dans le budget annoncé (' + budget.label + ') : dis-le honnêtement en une phrase, puis propose les plus proches ci-dessous en annonçant clairement leur prix.';
+  }
+  if (budget && c.sousBudget && !c.horsBudget) {
+    inject += '\nPeu de vins adaptés dans ce budget : certains candidats coûtent MOINS que la fourchette du client. Dis-le simplement en une phrase et annonce leur prix exact.';
   }
   inject += consigneOrdre(env.commercial);
   inject += '\nPLAT DU CLIENT : ' + decrirePlat(plat) + (plat.resume ? '. ' + plat.resume : '');

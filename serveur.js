@@ -577,13 +577,19 @@ async function chatHorsLigne(messages) {
   const tranche = !budget ? '8-15' : budget.max <= 8 ? '-8' : budget.max <= 15 ? '8-15' : budget.max <= 25 ? '15-25' : budget.max <= 50 ? '25-50' : '50+';
   // Budget annoncé : sa fourchette exacte, jamais au-dessus du plafond (règle du sommelier).
   const fourchette = budget ? { min: budget.min, max: budget.openFloor ? budget.max : SOMMELIER.plafondBudget(budget) } : undefined;
-  const couleur = /\brouges?\b/.test(dernier) ? 'rouge' : /\bblancs?\b/.test(dernier) ? 'blanc' : /\bros[ée]s?\b/.test(dernier) ? 'rosé'
+  // Couleur, goût et occasion : mêmes règles que le chat (sommelier.js). L'ancien repérage
+  // (\b après « é ») ne reconnaissait pas « rosé » : « un rosé pas cher » donnait un rouge,
+  // un blanc et un rosé (17 nov. 2026). Repli sur l'ancien repérage si sommelier.js est ancien.
+  const style = SOMMELIER.detecterStyle ? SOMMELIER.detecterStyle(duClient) : null;
+  const couleur = SOMMELIER.detecterStyle ? (style && style.couleur) || null
+    : /\brouges?\b/.test(dernier) ? 'rouge' : /\bblancs?\b/.test(dernier) ? 'blanc' : /\bros[ée]s?(?![a-z])/.test(dernier) ? 'rosé'
     : /bulles|champagne|cr[ée]mant|p[ée]tillant/.test(dernier) ? 'bulles' : null;
-  const cadeau = /cadeau|offrir|offert|à offrir/.test(dernier);
-  const demande = cadeau ? { occasion: 'offrir', gout: 'inconnu', budget: tranche, fourchette, couleur }
-    : plat === 'apéritif' ? { occasion: 'aperitif', budget: tranche, fourchette, couleur }
+  const cadeau = style ? style.occasion === 'offrir' : /cadeau|offrir|offert|à offrir/.test(dernier);
+  const gout = style && style.gout ? style.gout : 'inconnu';
+  const demande = cadeau ? { occasion: 'offrir', gout, budget: tranche, fourchette, couleur }
+    : plat === 'apéritif' ? { occasion: 'aperitif', gout, budget: tranche, fourchette, couleur }
     : plat ? { occasion: 'repas', pairing: plat, budget: tranche, fourchette, couleur }
-    : { occasion: 'offrir', gout: 'inconnu', budget: tranche, fourchette, couleur };
+    : { occasion: 'offrir', gout, budget: tranche, fourchette, couleur };
   // Format autre que 75 cl seulement s'il est demandé (« demi-bouteille », « magnum »…)
   const fmt = SOMMELIER.formatDemande ? SOMMELIER.formatDemande(duClient) : null;
   if (fmt) demande.format = fmt.petit && !fmt.grand ? 'petit' : fmt.grand && !fmt.petit ? 'grand' : undefined;
@@ -596,6 +602,7 @@ async function chatHorsLigne(messages) {
   const intro = cadeau ? 'Pour offrir, voici trois vins de notre rayon :'
     : plat === 'apéritif' ? 'Pour l\'apéritif, voici trois vins de notre rayon :'
     : plat ? 'Pour accompagner ' + (LIBELLES_PLAT[plat] || 'votre plat') + ', voici trois vins de notre rayon :'
+    : couleur ? 'Voici trois ' + { rouge: 'rouges', blanc: 'blancs', 'rosé': 'rosés', bulles: 'vins effervescents' }[couleur] + ' de notre rayon :'
     : 'Voici trois valeurs sûres de notre rayon :';
   const texte = intro + '\n\n' + ['🥇', '⭐', '✨'].map((icone, i) =>
     icone + ' ' + (vins[i].libelle || vins[i].name) + ' — ' + prix(vins[i].price) + '\n' + (raisons[vins[i].id] || vins[i].tastingNotes || '')).join('\n\n') +

@@ -186,8 +186,8 @@ function parseBudget(txt) {
 // (questionnaire guidé) pour que les deux entrées appliquent le même
 // raisonnement mets-vins.
 const PAIRING_RULES = {
-  'poisson':       'UNIQUEMENT blancs secs ou rosés très légers. AUCUN rouge.',
-  'fruits de mer': 'UNIQUEMENT blancs vifs, rosés très secs, ou bulles. AUCUN rouge.',
+  'poisson':       'Blancs secs ou rosés très légers. Rouge seulement si le client le demande : alors des rouges légers à tanins souples (pinot noir, gamay), servis frais ; sur le poisson cru, prévenir honnêtement que c\'est un compromis.',
+  'fruits de mer': 'Blancs vifs, rosés très secs, ou bulles. Rouge seulement si le client le demande : alors des rouges très légers et peu tanniques, servis bien frais, en prévenant honnêtement que c\'est un compromis.',
   'volaille':      'Blancs ronds ou rouges très légers (Gamay, Pinot Noir léger).',
   'viande':        'UNIQUEMENT rouges structurés. Pas de blanc.',
   'barbecue':      'Rouges fruités ou rosés charnus. Pas de blanc.',
@@ -224,6 +224,44 @@ function detectPairing(messages) {
     }
   }
   return null;
+}
+
+// ── Couleur et goût demandés dans le chat, quand aucun plat n'est évoqué ────────
+// (« un rouge léger », « un blanc sec pour l'apéro », « un champagne à offrir »).
+// Avant (17 nov. 2026), ces demandes n'avaient pas de candidats filtrés : l'IA piochait
+// dans tout le catalogue, sans couleur ni goût garantis. Renvoie null si rien n'est demandé.
+const COULEURS_CHAT = [
+  { c: 'bulles', r: /champagnes?|cr[ée]mants?|prosecco|\bcava\b|mousseux|p[ée]tillants?|bulles|effervescents?/g },
+  { c: 'rosé',   r: /\bros[ée]s?(?![a-z])/g },
+  { c: 'blanc',  r: /\bblancs?(?![a-z])/g },
+  { c: 'rouge',  r: /\brouges?(?![a-z])/g },
+];
+const GOUTS_CHAT = {
+  rouge:  [['rouge_leger', /l[ée]ger|frais|gouleyant|digeste|fluide/], ['rouge_puissant', /puissant|cors[ée]|charpent[ée]|costaud|tannique|structur[ée]|de garde/], ['rouge_rond', /rond|souple|gourmand|fruit[ée]|soyeux/]],
+  blanc:  [['blanc_moelleux', /moelleux|liquoreux|\bdoux|sucr[ée]/], ['blanc_beurre', /beurr[ée]|bois[ée]|\bgras|\brond/], ['blanc_aromatique', /aromatique|parfum[ée]|fruit[ée]|exotique/], ['blanc_vif', /\bsecs?\b|vif|min[ée]ral|frais|l[ée]ger/]],
+  'rosé': [['rose_tendre', /\bdoux|tendre|sucr[ée]|demi.sec/], ['rose_vineux', /soutenu|caract[èe]re|vineux|cors[ée]/], ['rose_fruite', /fruit[ée]|gourmand/], ['rose_pale', /p[âa]le|l[ée]ger|frais|provence/]],
+  bulles: [['bulles_douces', /\bdoux|douces?\b|demi.sec|sucr[ée]/], ['bulles_vineuses', /brioch[ée]|vineu|mill[ée]sim[ée]/], ['bulles_fruitees', /fruit[ée]|gourmand/], ['bulles_vives', /\bvifs?|vives?|l[ée]g[èe]re?s?|\bbrut|frais|fra[îi]che/]],
+  aucune: [['doux', /moelleux|liquoreux|\bdoux|sucr[ée]/], ['leger_frais', /l[ée]ger|frais|fra[îi]che/], ['riche_intense', /puissant|cors[ée]|intense|charpent[ée]/], ['fruite_gourmand', /fruit[ée]|gourmand/]],
+};
+function detecterStyle(messages) {
+  const textes = messages.filter(m => m.role === 'user').map(m => String(m.content || '').toLowerCase());
+  if (!textes.length) return null;
+  // Couleur : le dernier message qui en nomme une ; dans ce message, la dernière nommée
+  // (« pas de rouge », « sans bulles », « plutôt qu'un blanc » : couleur refusée, ignorée)
+  const nie = (txt, i) => /(pas\s+(de|du|d'|un|une)|sans|aucun|plut[ôo]t\s+qu'?(un|une|du)?|non)\s*(vin\s+)?$/.test(txt.slice(Math.max(0, i - 20), i));
+  let couleur = null;
+  for (let i = textes.length - 1; i >= 0 && !couleur; i--) {
+    let pos = -1;
+    COULEURS_CHAT.forEach(({ c, r }) => { for (const m of textes[i].matchAll(r)) if (m.index > pos && !nie(textes[i], m.index)) { pos = m.index; couleur = c; } });
+  }
+  // Appellation effervescente nommée (« un champagne ») : seuls les vins de cette appellation
+  const appellation = (textes.slice(-2).join(' ').match(/champagne|cr[ée]mant|prosecco|\bcava\b/) || [null])[0];
+  const recent = textes.slice(-2).join(' ');
+  const g = (GOUTS_CHAT[couleur || 'aucune'] || []).find(([, r]) => r.test(recent));
+  const tout = textes.join(' ');
+  const occasion = /offrir|cadeau/.test(tout) ? 'offrir' : /ap[ée]ro|ap[ée]ritif/.test(tout) ? 'aperitif' : null;
+  if (!couleur && !g && !occasion) return null;
+  return { couleur, gout: g ? g[0] : 'inconnu', occasion, appellation: couleur === 'bulles' ? appellation : null };
 }
 
 // Vins proposables : on écarte ceux dont le stock est à 0 (ou négatif). Un vin
@@ -305,6 +343,9 @@ async function repondreSommelier(body, env) {
         plafond: budget ? plafondBudget(budget) : null, consigneBudget, commercial }).catch(() => null)
     : null;
   const pairing = moteur ? null : detectPairing(messages);
+  // Couleur / goût / occasion demandés sans plat (« un rouge léger », « un champagne à offrir »)
+  const style = moteur || !ACCORDS ? null : detecterStyle(messages);
+  if (style) console.log('🎨 Style demandé :', [style.couleur, style.gout, style.occasion].filter(Boolean).join(', '));
 
   if (budget)  console.log('💰 Budget:', budget.label, '→', Math.round(budget.min) + '€ –', Math.round(budget.max) + '€');
   if (pairing) console.log('🍽  Accord:', pairing);
@@ -315,8 +356,25 @@ async function repondreSommelier(body, env) {
 
   if (moteur) {
     finalSystem = moteur.finalSystem; tierWines = moteur.tierWines; available = moteur.available;
-  } else if ((budget || pairing) && WINES_CATALOG.length) {
+  } else if ((budget || pairing || style) && WINES_CATALOG.length) {
     const pairingOk = w => !pairing || (w.pairings && w.pairings.includes(pairing));
+    // Couleur demandée : seuls les vins de cette couleur (s'il y en a au moins 3) ;
+    // goût demandé : note de style du moteur d'accords, les vins hors style sont écartés.
+    const notesStyle = new Map();
+    let CATALOGUE = WINES_CATALOG;
+    if (style) {
+      const memeCouleur = style.couleur ? WINES_CATALOG.filter(w => w.type === style.couleur) : WINES_CATALOG;
+      if (memeCouleur.length >= 3) CATALOGUE = memeCouleur;
+      if (style.appellation) {
+        const nomme = new RegExp(style.appellation.replace(/[ée]/g, '[ée]'), 'i');
+        const memeAppellation = CATALOGUE.filter(w => nomme.test((w.appellation || '') + ' ' + (w.name || '')));
+        if (memeAppellation.length >= 3) CATALOGUE = memeAppellation;
+      }
+      CATALOGUE.forEach(w => notesStyle.set(w.id, ACCORDS.noterStyle(w, style.gout, style.occasion).score));
+      const dansLeStyle = CATALOGUE.filter(w => notesStyle.get(w.id) > -99);
+      if (dansLeStyle.length >= 3) CATALOGUE = dansLeStyle;
+    }
+    const noteStyle = w => notesStyle.has(w.id) ? notesStyle.get(w.id) : 0;
 
     // ── Escalier de prix sur 3 paliers, tous DANS la fourchette du client ──
     //   (budget.paliers, calculés par parseBudget) : on ne dépasse jamais le plafond.
@@ -330,10 +388,10 @@ async function repondreSommelier(body, env) {
       // sur ce budget+accord : 1) bande normale  2) plancher abaissé  3) sans accord
       // (on n'élargit que vers le BAS : le plafond ne bouge jamais)
       const inBand = (w, lo) => w.price >= lo && w.price <= ceiling;
-      let pool = WINES_CATALOG.filter(w => pairingOk(w) && inBand(w, budget.min * 0.95));
-      if (pool.length < 6) pool = WINES_CATALOG.filter(w => pairingOk(w) && inBand(w, ref * 0.55));
-      if (pool.length < 3) pool = WINES_CATALOG.filter(w => inBand(w, budget.min * 0.95));
-      if (pool.length < 3) pool = WINES_CATALOG.filter(w => inBand(w, ref * 0.55));
+      let pool = CATALOGUE.filter(w => pairingOk(w) && inBand(w, budget.min * 0.95));
+      if (pool.length < 6) pool = CATALOGUE.filter(w => pairingOk(w) && inBand(w, ref * 0.55));
+      if (pool.length < 3) pool = CATALOGUE.filter(w => inBand(w, budget.min * 0.95));
+      if (pool.length < 3) pool = CATALOGUE.filter(w => inBand(w, ref * 0.55));
 
       // Découpage en 3 bandes de prix autour des paliers (pas d'épuisement entre paliers)
       const cut1 = (tiers[0] + tiers[1]) / 2;
@@ -345,8 +403,15 @@ async function repondreSommelier(body, env) {
       ];
       tierWines = tiers.map((target, i) => {
         let cands = bands[i];
-        if (!cands.length) cands = pool; // bande vide → on propose les plus proches du palier
+        // bande vide → la bande voisine (jamais tout le vivier : ✨ ne doit pas coûter moins que ⭐)
+        if (!cands.length) cands = i === 2 ? (bands[1].length ? bands[1] : bands[0]) : i === 0 ? (bands[1].length ? bands[1] : bands[2]) : pool;
+        if (!cands.length) cands = pool;
         const bonusCom = ACCORDS ? ACCORDS.bonusStrategie(commercial, cands) : () => 0;
+        if (style) {
+          // Goût demandé : le style d'abord, la proximité du palier ensuite (comme le moteur d'accords)
+          const val = w => noteStyle(w) + featuredBonus(w) + bonusCom(w) - Math.abs(w.price - target) / Math.max(1, target) * 20;
+          return [...cands].sort((a, b) => val(b) - val(a)).slice(0, 5);
+        }
         return [...cands].sort((a, b) => {
           const da = Math.abs(a.price - target), db = Math.abs(b.price - target);
           if (Math.abs(da - db) > 2) return da - db;
@@ -357,12 +422,14 @@ async function repondreSommelier(body, env) {
     } else {
       // Sans budget annoncé : on reste grand public (45 € maximum), autour du prix médian
       // de ces vins ; mise en avant magasin et stratégie départagent.
-      const grandPublic = WINES_CATALOG.filter(w => pairingOk(w) && w.price <= 45);
-      const vivier = grandPublic.length >= 3 ? grandPublic : WINES_CATALOG.filter(w => pairingOk(w));
+      const grandPublic = CATALOGUE.filter(w => pairingOk(w) && w.price <= 45);
+      let vivier = grandPublic.length >= 3 ? grandPublic : CATALOGUE.filter(w => pairingOk(w));
+      if (vivier.length < 3) vivier = CATALOGUE.filter(w => w.price <= 45);   // ex. « un rouge pour l'apéro » : peu de rouges notés apéritif
+      if (vivier.length < 3) vivier = CATALOGUE;
       const prixTries = vivier.map(w => w.price).sort((a, b) => a - b);
       const median = prixTries[Math.floor(prixTries.length / 2)] || 15;
       const bonusCom = ACCORDS ? ACCORDS.bonusStrategie(commercial, vivier) : () => 0;
-      const val = w => featuredBonus(w) + bonusCom(w) - Math.abs(w.price - median) / Math.max(1, median) * 10;
+      const val = w => noteStyle(w) + featuredBonus(w) + bonusCom(w) - Math.abs(w.price - median) / Math.max(1, median) * 10;
       available = [...vivier].sort((a, b) => val(b) - val(a)).slice(0, 15);
     }
 
@@ -372,8 +439,15 @@ async function repondreSommelier(body, env) {
       inject += consigneBudget(budget);
     }
 
-    if (pairing) {
+    // (règle apéritif ou dessert muette quand le client a choisi sa couleur : « un rouge pour l'apéro »)
+    if (pairing && !(style && style.couleur && ['apéritif', 'dessert'].includes(pairing))) {
       inject += '\nACCORD : ' + (PAIRING_RULES[pairing] || 'adapte le vin au plat.');
+    }
+    if (style && style.couleur && CATALOGUE.every(w => w.type === style.couleur)) {
+      inject += '\nCOULEUR : le client veut ' + { rouge: 'du rouge', blanc: 'du blanc', 'rosé': 'du rosé', bulles: 'des bulles' }[style.couleur] + ' : ne propose que des vins de cette couleur.';
+    }
+    if (style && style.gout !== 'inconnu' && ACCORDS.GOUTS[style.gout]) {
+      inject += '\nGOÛT DEMANDÉ : ' + ACCORDS.GOUTS[style.gout] + '. Les candidats sont classés du plus proche au moins proche de ce goût : privilégie les premiers de chaque liste.';
     }
 
     if (available.length >= 3) {
@@ -804,5 +878,6 @@ module.exports = {
   parseBudget,
   plafondBudget,
   detectPairing,
+  detecterStyle,
   BUDGET_BRACKETS,
 };
