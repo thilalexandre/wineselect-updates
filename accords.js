@@ -585,6 +585,9 @@ const PLATS_CATEGORIES = {
   'fromage/molle':  { plat: 'fromage à pâte molle (brie, camembert)', proteine: 'fromage', corps: 2, gras: 3, intensite: 2 },
   'fromage/dure':   { plat: 'fromage à pâte dure (comté, gruyère)', proteine: 'fromage', corps: 3, gras: 2, sousbois: 1, intensite: 3 },
   'fromage/bleu':   { plat: 'fromage bleu (roquefort)', proteine: 'fromage', corps: 3, gras: 3, intensite: 3, affinite_moelleux: true },
+  // Raclette, fondue (17 nov. 2026) : fromage fondu, riche et gras ; accord régional savoyard,
+  // rouge léger si le client veut du rouge (règle fromageFondu de noterVin)
+  'fromage/fondu':  { plat: 'raclette ou fondue (fromage fondu)', proteine: 'fromage', cuisson: 'gratine', sauce: 'fromage', corps: 3, gras: 3, intensite: 2, region: 'Savoie' },
   'charcuterie':    { plat: 'charcuterie', proteine: 'charcuterie', corps: 2, gras: 2, intensite: 2 },
   'dessert':        { plat: 'dessert', proteine: 'dessert', sucre: 2, corps: 2, intensite: 2 },
   'méditerranéen':  { plat: 'cuisine méditerranéenne', proteine: 'aucun', sauce: 'tomate', corps: 2, acidite: 2, aromatique: 2, intensite: 2 },
