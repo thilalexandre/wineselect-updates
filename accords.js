@@ -131,6 +131,13 @@ function noterVin(wine, d) {
   const dessert = d.proteine === 'dessert' || d.sucre >= 2;
   const creme = ['creme', 'beurre', 'fromage', 'champignons'].includes(d.sauce);
   const tendre = ['mijote', 'gratine', 'poche'].includes(d.cuisson);
+  // Fromage fondu (raclette, fondue, tartiflette) : riche, mais l'accord classique est un vin
+  // léger et vif (Savoie, Beaujolais, pinot noir), jamais un rouge puissant ou tannique
+  // (test au Super U le 17 nov. 2026 : Terrasses du Larzac et Saint-Émilion sur une raclette).
+  const fromageFondu = /raclette|fondue|tartiflette|mont.d.or chaud|reblochonnade/i.test(d.plat || '') ||
+    (d.proteine === 'fromage' && (d.sauce === 'fromage' || d.cuisson === 'gratine'));
+  const rougeFondu = fromageFondu && t === 'rouge';
+  const rougeLegerFondu = rougeFondu && p.tanins <= 1 && (p.corps === 1 || p.fraicheur === 3);
   // Plat très gras : un vin vif et plus léger « allège » (fondue + Apremont, choucroute + Riesling)
   const allege = d.gras >= 3 && p.fraicheur === 3 && (t === 'blanc' || t === 'bulles');
 
@@ -146,12 +153,15 @@ function noterVin(wine, d) {
   if (d.sucrosite_demandee != null && Math.abs(p.sucrosite - d.sucrosite_demandee) >= 2) return veto('pas le style demandé par le client');
 
   // ─ Socle commun : corps, intensité, sucre
-  const dc = Math.max(0, Math.abs(p.corps - d.corps) - (allege ? 1 : 0));
+  // Rouge sur fromage fondu : on vise un rouge léger (corps 1), quelle que soit la richesse du plat
+  const corpsVise = rougeFondu ? 1 : d.corps;
+  const intensiteVisee = rougeFondu ? Math.min(d.intensite, 2) : d.intensite;
+  const dc = Math.max(0, Math.abs(p.corps - corpsVise) - (allege ? 1 : 0));
   add([22, 8, -15][dc], ['corps à la hauteur du plat', 'corps proche du plat', 'corps décalé avec le plat'][dc]);
   // Un vin vif et sans bois porte sa concentration sans écraser un plat délicat
   // (Chablis 1er Cru sur une sole) : l'écart d'intensité compte un cran de moins.
   const vifSansBois = p.intensite > d.intensite && p.fraicheur === 3 && !p.boise;
-  const di = Math.max(0, Math.abs(p.intensite - d.intensite) - (vifSansBois ? 1 : 0));
+  const di = Math.max(0, Math.abs(p.intensite - intensiteVisee) - (vifSansBois ? 1 : 0));
   add([8, 3, -6][di], di === 0 ? 'même intensité que le plat' : di === 2 ? 'intensité décalée' : null);
 
   if (d.sucrosite_demandee != null) {
@@ -214,6 +224,10 @@ function noterVin(wine, d) {
     if (['mijote', 'gratine'].includes(d.cuisson) && p.fruit >= 2) add(5, 'fruit mûr pour un plat mijoté');
     if (['cru', 'vapeur', 'poche'].includes(d.cuisson) && p.boise === 2) add(-10, 'boisé trop marqué pour une cuisson douce');
     if (d.proteine === 'fromage' && p.tanins === 3) add(-6, 'tanins fermes sur fromage');
+    if (fromageFondu) {
+      if (rougeLegerFondu) add(12, 'rouge léger et peu tannique, l\'accord classique du fromage fondu');
+      if (p.tanins >= 2) add(-8, 'tanins qui durcissent au contact du fromage fondu');
+    }
     if (d.sousbois >= 2 && p.corps >= 2 && p.fruit >= 2) add(6, 'répond au sous-bois');
     if (d.proteine === 'dessert' && p.sucrosite >= 2 && /chocolat|cafe|caramel/i.test(d.plat)) add(15, 'vin doux naturel et chocolat');
   }
