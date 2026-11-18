@@ -60,7 +60,8 @@ try {
 } catch(e) {}
 // Cohérence budget/prix : la tranche affichée découle TOUJOURS du prix réel,
 // pour que la sélection guidée ne propose jamais un vin hors du budget choisi.
-const budgetForPrice = p => p<=8 ? '-8' : p<=15 ? '8-15' : p<=25 ? '15-25' : p<=50 ? '25-50' : '50+';
+// Tranches du 18 nov. 2026 (même règle que trancheBudget() dans central/catalogue.js)
+const budgetForPrice = p => p<=6 ? '-6' : p<=10 ? '6-10' : p<=15 ? '10-15' : p<=25 ? '15-25' : '25+';
 WINES.forEach(w=>{ w.budget = budgetForPrice(w.price); });
 
 // ── Fiche produit : nom affiché, ligne de détails, photo, emplacement ────────
@@ -164,27 +165,31 @@ function EnteteIvoire({onBack, droite}) {
 }
 
 // ── Icônes vectorielles (remplacent les emojis) ──
+// Une couleur par plat, toutes distinctes sur l'écran « Qu'allez-vous manger ? » (18 nov. 2026) :
+// viande rouge, charcuterie rose, barbecue brun fumé, volaille orange rôti, fromage jaune,
+// poisson bleu, fruits de mer turquoise, dessert cassis, méditerranéen olive, asiatique indigo,
+// Noël vert sapin.
 const PAIRING_COLORS = {
-  viande:'#B33A3A', charcuterie:'#8B5A3C', barbecue:'#C1652C',
-  volaille:'#B98A2E', fromage:'#C7A730',
-  poisson:'#3E6FA6', 'fruits de mer':'#2E8B92',
-  'apéritif':'#D45C87', dessert:'#7A3F5C',
-  'méditerranéen':'#7A8C4A', asiatique:'#D9932E',
+  viande:'#B33A3A', charcuterie:'#C4577A', barbecue:'#6E4630',
+  volaille:'#D6832B', fromage:'#C9A227',
+  poisson:'#3E6FA6', 'fruits de mer':'#2A8F8F',
+  'apéritif':'#D45C87', dessert:'#8A3F7A',
+  'méditerranéen':'#7A8C3A', asiatique:'#4F5AA0',
   noel:'#3F6B4E',
 };
 const PAIRING_COLORS_LIGHT = {
-  viande:'#D99B9B', charcuterie:'#D3B092', barbecue:'#DDA87F',
-  volaille:'#E0C285', fromage:'#E3CE86',
-  poisson:'#A0BEDA', 'fruits de mer':'#97C7CA',
-  'apéritif':'#E8A0BB', dessert:'#B48CA0',
-  'méditerranéen':'#BDC9A0', asiatique:'#EBC287',
+  viande:'#D99B9B', charcuterie:'#E4A6BA', barbecue:'#BFA290',
+  volaille:'#EDBE8A', fromage:'#E5D08A',
+  poisson:'#A0BEDA', 'fruits de mer':'#93CBCB',
+  'apéritif':'#E8A0BB', dessert:'#C79CBF',
+  'méditerranéen':'#C2CB98', asiatique:'#A9AFD6',
 };
 const PAIRING_BG = {
-  viande:'#fcebea', charcuterie:'#f5ece4', barbecue:'#faede0',
-  volaille:'#faeeda', fromage:'#fbf3dc',
-  poisson:'#e6eef6', 'fruits de mer':'#e3f0f1',
-  'apéritif':'#fbe7ef', dessert:'#f0e5ec',
-  'méditerranéen':'#eff3e5', asiatique:'#fbf0de',
+  viande:'#fcebea', charcuterie:'#fbe8ee', barbecue:'#f1ebe7',
+  volaille:'#fcefe2', fromage:'#fbf4dc',
+  poisson:'#e6eef6', 'fruits de mer':'#e2f2f2',
+  'apéritif':'#fbe7ef', dessert:'#f4e6f1',
+  'méditerranéen':'#f1f3e3', asiatique:'#e9eaf5',
 };
 function TypeIcon({id, color, size=32}){
   const c=color||'#6B2635';
@@ -304,11 +309,11 @@ const TYPES=[
   {id:'bulles', label:'Bulles', desc:'Effervescence et finesse',  color:'#B98A2E', bg:'#faeeda'},
 ];
 const BUDGETS=[
-  {id:'-8',   label:'Moins de 8€', desc:'Plaisir quotidien'},
-  {id:'8-15', label:'8 – 15€',     desc:'Qualité accessible'},
+  {id:'-6',   label:'Moins de 6€', desc:'Petits prix'},
+  {id:'6-10', label:'6 – 10€',     desc:'Plaisir quotidien'},
+  {id:'10-15',label:'10 – 15€',    desc:'Qualité accessible'},
   {id:'15-25',label:'15 – 25€',    desc:'Belles découvertes'},
-  {id:'25-50',label:'25 – 50€',    desc:'Grands moments'},
-  {id:'50+',  label:'50€ et plus', desc:"Cuvées d'exception"},
+  {id:'25+',  label:'25€ et plus', desc:'Grands moments'},
 ];
 const PAIRINGS=[
   {id:'viande',        label:'Viande'},
@@ -727,15 +732,13 @@ function filterWines(type, budget, pairing) {
     (!pairing || (w.pairings||[]).includes(pairing))
   );
 
-  if (budget === '50+') {
-    // Tranche sans plafond : 3 paliers progressifs (accessible ~60€ /
-    // milieu ~80€ / haut de gamme ~130€) pour ne jamais proposer d'entrée
-    // un grand cru très cher a un client qui a juste dit "plus de 50€".
-    const tiers = [
-      { max: 70, target: 60 },
-      { max: 100, target: 80 },
-      { max: Infinity, target: 130 },
-    ];
+  if (budget === '25+' || budget === '50+') {
+    // Tranche sans plafond : 3 paliers progressifs (« 25 € et plus » : ~30 € / ~40 € / ~60 € ;
+    // ancienne « 50 € et plus » : ~60 € / ~80 € / ~130 €) pour ne jamais proposer d'entrée
+    // un grand cru très cher à un client qui a juste dit « plus de 25 € ».
+    const tiers = budget === '25+'
+      ? [{ max: 35, target: 30 }, { max: 50, target: 40 }, { max: Infinity, target: 60 }]
+      : [{ max: 70, target: 60 }, { max: 100, target: 80 }, { max: Infinity, target: 130 }];
     const rankOf = price => tiers.findIndex(t => price <= t.max);
     const used = new Set();
     const ladder = [];
@@ -1299,23 +1302,78 @@ const RECETTES_UI = [
   {id:'sauce',       label:'Une sauce ou un déglaçage', couleur:null},
 ];
 
-// ── Couleur par catégorie (novembre 2026) ───────────────────────────────────
-// Chaque occasion, style de goût et tranche de budget a sa teinte : c = couleur
-// d'accent (icône, flèche), bg = fond clair (médaillon, lavis de la carte).
+// ── Couleur par catégorie (novembre 2026, refonte du 18 nov.) ────────────────
+// Sur un même écran, chaque bouton a sa propre teinte : c = couleur d'accent (filet,
+// icône, flèche), bg = fond clair (médaillon, lavis de la carte), calculé par lavis().
+// Un même code d'un écran à l'autre, pour que la couleur « parle » au client :
+//   fraîcheur, vivacité → bleus et bleu-vert   fruit → rouges et roses
+//   structure, puissance → teintes profondes    douceur → ambre, miel, pêche
+//   prix → du vert « bon plan » à l'or « exception »
+const lavis = (hex, part) => {
+  const p = part === undefined ? 0.87 : part;
+  const n = parseInt(hex.slice(1), 16);
+  const m = v => Math.round(v + (255 - v) * p).toString(16).padStart(2, '0');
+  return '#' + m(n >> 16) + m((n >> 8) & 255) + m(n & 255);
+};
+const T = c => ({c: c, bg: lavis(c)});
 const TEINTES_OCCASION = {
-  aperitif: {c:'#a77a24', bg:'#f9ecd2'},   // or champagne
-  repas:    {c:'#7d1f2e', bg:'#f6e2e5'},   // bordeaux
-  offrir:   {c:'#b0383a', bg:'#fbe4df'},   // rouge cadeau
-  cuisiner: {c:'#b0602f', bg:'#f8e8dc'},   // terracotta
+  aperitif: T('#a77a24'),   // or champagne : la convivialité
+  repas:    T('#7d1f2e'),   // bordeaux : la table
+  offrir:   T('#7a3a6e'),   // prune : le cadeau, l'élégance
+  cuisiner: T('#64773a'),   // olive : les herbes, la cuisine
 };
 const TEINTES_GOUT = {
-  leger_frais:     {c:'#3f8378', bg:'#e2f0ec'},
-  fruite_gourmand: {c:'#bb4367', bg:'#fae3ea'},
-  riche_intense:   {c:'#6b2635', bg:'#f1dfe3'},
-  doux:            {c:'#b9852a', bg:'#faedd3'},
+  // Goûts généraux
+  leger_frais:     T('#3f8378'),   // bleu-vert : fraîcheur
+  fruite_gourmand: T('#bb4367'),   // framboise : fruit
+  riche_intense:   T('#6b2635'),   // grenat profond : matière
+  doux:            T('#b9852a'),   // miel : douceur
+  // Rouge
+  rouge_leger:    T('#c0344a'),    // cerise : fruits rouges croquants
+  rouge_rond:     T('#7b3a72'),    // mûre : fruit mûr, rondeur
+  rouge_puissant: T('#5c2a22'),    // cacao : structure
+  // Blanc
+  blanc_vif:        T('#3d7a93'),  // bleu ardoise : minéralité
+  blanc_aromatique: T('#6c8a2c'),  // tilleul : fleurs, agrumes
+  blanc_beurre:     T('#b08a2a'),  // beurre doré : rondeur, brioche
+  blanc_moelleux:   T('#c0652a'),  // ambre : douceur
+  // Rosé
+  rose_pale:   T('#c27a86'),       // rose poudré : délicatesse
+  rose_fruite: T('#d0405e'),       // fraise : fruit
+  rose_vineux: T('#8e2b45'),       // grenat : caractère
+  rose_tendre: T('#d07c3a'),       // pêche : une pointe de douceur
+  // Bulles
+  bulles_vives:    T('#3f86a6'),   // bleu glacier : vivacité
+  bulles_fruitees: T('#6f9a3a'),   // poire, pomme verte : fruit frais
+  bulles_vineuses: T('#a8762a'),   // brioche dorée : matière
+  bulles_douces:   T('#c25a8a'),   // dragée : douceur
 };
-// Budgets : de l'or clair au bordeaux profond à mesure que le prix monte
-const TEINTES_BUDGET = ['#a77a24', '#9a5a2c', '#8a3a30', '#74242f', '#5e1622'];
+// Budgets : vert « bon plan », bleu « confiance », prune « découverte »,
+// bordeaux « grand vin », or « grands moments »
+const TEINTES_BUDGET = {
+  '-6':    T('#4f8a5b'),
+  '6-10':  T('#3a6f9e'),
+  '10-15': T('#7a3f72'),
+  '15-25': T('#7d1f2e'),
+  '25+':   T('#a77a24'),
+};
+// Préparation du plat (« Comment est-il préparé ? »), par catégorie
+const TEINTES_DETAIL = {
+  'viande/boeuf': T('#b23a3a'), 'viande/agneau': T('#6f7f3a'), 'viande/porcveau': T('#c4577a'), 'viande/gibier': T('#6b4a2a'),
+  'volaille/grillee': T('#d6832b'), 'volaille/sauce': T('#8e3b2e'), 'volaille/canard': T('#7d1f2e'),
+  'poisson/cru': T('#2a8f8f'), 'poisson/grille': T('#3e6fa6'), 'poisson/sauce': T('#b0902e'),
+  'fruits de mer/cru': T('#4a7896'), 'fruits de mer/cuit': T('#d9694a'),
+  'fromage/frais': T('#5f9a5f'), 'fromage/molle': T('#b8962e'), 'fromage/dure': T('#c9742a'), 'fromage/bleu': T('#3d6a9a'), 'fromage/fondu': T('#9a4a2e'),
+};
+// Menu de Noël : la couleur du plat
+const TEINTES_NOEL = {
+  huitres: '#4f7a92', saumon: '#e0704e', foiegras: '#c76f7f', stjacques: '#2f5684', chapon: '#b8862e', buche: '#6b3f2a',
+};
+// Cuisiner : la couleur de la recette
+const TEINTES_RECETTE = {
+  bourguignon: T('#7d1f2e'), coq_au_vin: T('#a0452e'), moules: T('#2f5070'),
+  risotto: T('#6f8a3a'), fondue: T('#c9a227'), sauce: T('#b0602f'),
+};
 function OccasionIcon({id, size=30, color}) {
   const c = color || C.wine;
   const s = {fill:'none', stroke:c, strokeWidth:1.6, strokeLinecap:'round', strokeLinejoin:'round'};
@@ -1594,7 +1652,8 @@ function Selection({setView, setResults, depart}) {
             <div className="ws-cascade" style={{display:'grid', gridTemplateColumns:'1fr', gap:11, maxWidth:460, margin:'0 auto'}}>
               {goutsOrdre.map(g => {
                 const tc = TYPES.find(t => t.id === couleur);
-                const teinte = g.id === 'inconnu' ? null : TEINTES_GOUT[g.id] || (tc ? {c:tc.color, bg:tc.bg} : null);
+                // Chaque goût a sa teinte (voir TEINTES_GOUT) ; « Je ne sais pas » reste neutre
+                const teinte = g.id === 'inconnu' ? null : TEINTES_GOUT[g.id] || (tc ? T(tc.color) : null);
                 return <Carte key={g.id} label={g.label} desc={g.desc} accent={g.id === 'inconnu'} teinte={teinte} onClick={() => pickGout(g.id)}/>;
               })}
             </div>
@@ -1616,13 +1675,16 @@ function Selection({setView, setResults, depart}) {
             {titre('Comment est-il préparé ?')}
             <div style={{textAlign:'center', fontSize:13, color:C.muted, marginTop:-16, marginBottom:22}}>Pour un accord plus juste — facultatif</div>
             <div className="ws-cascade" style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:12}}>
-              {(PAIRING_DETAILS[pairing] || []).map(d => (
-                <div key={d.id} onClick={() => pickDetail(d)} className="ws-carte ws-tap" style={{background:'linear-gradient(180deg, #ffffff, #fffbf5)', border:'1px solid ' + C.bord, borderRadius:16, padding:'18px 12px', minHeight:76, display:'flex', alignItems:'center', justifyContent:'center', textAlign:'center', cursor:'pointer'}}
-                  onMouseEnter={e => { e.currentTarget.style.borderColor = C.wine; }}
-                  onMouseLeave={e => { e.currentTarget.style.borderColor = C.bord; }}>
-                  <div style={{...serif, fontSize:18, fontWeight:600, color:C.ink, lineHeight:1.2}}>{d.label}</div>
-                </div>
-              ))}
+              {(PAIRING_DETAILS[pairing] || []).map(d => {
+                const t = TEINTES_DETAIL[pairing + '/' + d.id] || T(PAIRING_COLORS[pairing] || C.wine);
+                return (
+                  <div key={d.id} onClick={() => pickDetail(d)} className="ws-carte ws-tap" style={{background:'linear-gradient(100deg, ' + t.bg + ' 0%, #fffdf9 55%, #ffffff 100%)', border:'1px solid ' + C.bord, borderLeft:'4px solid ' + t.c, borderRadius:16, padding:'18px 12px', minHeight:76, display:'flex', alignItems:'center', justifyContent:'center', textAlign:'center', cursor:'pointer'}}
+                    onMouseEnter={e => { e.currentTarget.style.borderColor = t.c; }}
+                    onMouseLeave={e => { e.currentTarget.style.borderColor = C.bord; e.currentTarget.style.borderLeftColor = t.c; }}>
+                    <div style={{...serif, fontSize:18, fontWeight:600, color:C.ink, lineHeight:1.2}}>{d.label}</div>
+                  </div>
+                );
+              })}
               <div onClick={() => pickDetail(null)} className="ws-tap" style={{gridColumn:'1 / -1', marginTop:6, background:C.soft, border:'1px solid ' + C.bord, borderRadius:14, padding:'16px 10px', minHeight:56, textAlign:'center', cursor:'pointer', color:C.body, fontSize:14}}
                 onMouseEnter={e => e.currentTarget.style.borderColor = C.wine} onMouseLeave={e => e.currentTarget.style.borderColor = C.bord}>
                 Peu importe, conseillez-moi
@@ -1635,7 +1697,7 @@ function Selection({setView, setResults, depart}) {
           <div>
             {titre('Quel plat ?')}
             <div className="ws-cascade" style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:12}}>
-              {NOEL_PLATS.map(d => <TuilePhoto key={d.id} id={d.id} label={d.label} hauteur={90} couleur={VERT_SAPIN} onClick={() => pickDetail(d)}/>)}
+              {NOEL_PLATS.map(d => <TuilePhoto key={d.id} id={d.id} label={d.label} hauteur={90} couleur={TEINTES_NOEL[d.id] || VERT_SAPIN} onClick={() => pickDetail(d)}/>)}
               <BoutonLibre label="Un autre plat ? Dites-le" onClick={ouvrirLibre}/>
             </div>
           </div>
@@ -1645,13 +1707,16 @@ function Selection({setView, setResults, depart}) {
           <div>
             {titre('Quelle recette ?')}
             <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:10}}>
-              {RECETTES_UI.map(r => (
-                <div key={r.id} onClick={() => pickRecette(r.id)} style={{background:C.cream, border:'1px solid ' + C.bord, borderRadius:14, padding:'18px 12px', minHeight:72, display:'flex', alignItems:'center', justifyContent:'center', textAlign:'center', cursor:'pointer', transition:'border-color .3s'}}
-                  onMouseEnter={e => { e.currentTarget.style.borderColor = C.wine; }}
-                  onMouseLeave={e => { e.currentTarget.style.borderColor = C.bord; }}>
-                  <div style={{...serif, fontSize:18, color:C.ink, fontWeight:600, lineHeight:1.2}}>{r.label}</div>
-                </div>
-              ))}
+              {RECETTES_UI.map(r => {
+                const t = TEINTES_RECETTE[r.id] || T(C.wine);
+                return (
+                  <div key={r.id} onClick={() => pickRecette(r.id)} className="ws-carte ws-tap" style={{background:'linear-gradient(100deg, ' + t.bg + ' 0%, #fffdf9 55%, #ffffff 100%)', border:'1px solid ' + C.bord, borderLeft:'4px solid ' + t.c, borderRadius:14, padding:'18px 12px', minHeight:72, display:'flex', alignItems:'center', justifyContent:'center', textAlign:'center', cursor:'pointer', transition:'border-color .3s'}}
+                    onMouseEnter={e => { e.currentTarget.style.borderColor = t.c; }}
+                    onMouseLeave={e => { e.currentTarget.style.borderColor = C.bord; e.currentTarget.style.borderLeftColor = t.c; }}>
+                    <div style={{...serif, fontSize:18, color:C.ink, fontWeight:600, lineHeight:1.2}}>{r.label}</div>
+                  </div>
+                );
+              })}
               <BoutonLibre label="Une autre recette ? Dites-la" onClick={ouvrirLibre}/>
             </div>
           </div>
@@ -1685,15 +1750,17 @@ function Selection({setView, setResults, depart}) {
           <div>
             {titre('Quel est votre budget ?')}
             <div className="ws-cascade" style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:12}}>
-              {BUDGETS.map((b, i) => (
-                <div key={b.id} onClick={() => pickBudget(b.id)} className="ws-carte ws-tap" style={{gridColumn:(i === BUDGETS.length - 1 && BUDGETS.length % 2) ? '1 / -1' : 'auto', background:budget === b.id ? 'linear-gradient(135deg, #f8f0e1, #f2e6d1)' : 'linear-gradient(180deg, #ffffff, #fffbf5)', border:'1px solid ' + (budget === b.id ? C.wine : C.bord), borderRadius:18, padding:'22px 14px', minHeight:108, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', textAlign:'center', cursor:'pointer', transition:'border-color .3s'}}
-                  onMouseEnter={e => e.currentTarget.style.borderColor = C.wine}
-                  onMouseLeave={e => { if (budget !== b.id) e.currentTarget.style.borderColor = C.bord; }}>
-                  <div style={{width:34, height:3, borderRadius:3, background:TEINTES_BUDGET[i] || C.wine, marginBottom:12, opacity:.85}}/>
-                  <div style={{...serif, fontSize:26, fontWeight:600, color:TEINTES_BUDGET[i] || C.wine, marginBottom:6, lineHeight:1}}>{b.label}</div>
-                  <div style={capsIv(10, C.muted, {letterSpacing:'.14em'})}>{b.desc}</div>
-                </div>
-              ))}
+              {BUDGETS.map((b, i) => {
+                const t = TEINTES_BUDGET[b.id] || T(C.wine);
+                return (
+                  <div key={b.id} onClick={() => pickBudget(b.id)} className="ws-carte ws-tap" style={{gridColumn:(i === BUDGETS.length - 1 && BUDGETS.length % 2) ? '1 / -1' : 'auto', background:'linear-gradient(180deg, ' + t.bg + ' 0%, #fffdf9 70%, #ffffff 100%)', border:'1px solid ' + (budget === b.id ? t.c : C.bord), borderTop:'4px solid ' + t.c, borderRadius:18, padding:'20px 14px', minHeight:108, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', textAlign:'center', cursor:'pointer', transition:'border-color .3s'}}
+                    onMouseEnter={e => e.currentTarget.style.borderColor = t.c}
+                    onMouseLeave={e => { if (budget !== b.id) { e.currentTarget.style.borderColor = C.bord; e.currentTarget.style.borderTopColor = t.c; } }}>
+                    <div style={{...serif, fontSize:26, fontWeight:600, color:t.c, marginBottom:6, lineHeight:1}}>{b.label}</div>
+                    <div style={capsIv(10, C.muted, {letterSpacing:'.14em'})}>{b.desc}</div>
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}
@@ -1707,9 +1774,9 @@ function Selection({setView, setResults, depart}) {
               </div>
               <div className="ws-cascade" style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:12}}>
                 {TYPES.map(t => (
-                  <div key={t.id} onClick={() => pickCouleur(t.id)} className="ws-carte ws-tap" style={{background:'linear-gradient(180deg, #ffffff, #fffbf5)', border:'1px solid ' + C.bord, borderRadius:18, padding:'20px 14px', minHeight:124, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', textAlign:'center', cursor:'pointer', transition:'border-color .3s'}}
+                  <div key={t.id} onClick={() => pickCouleur(t.id)} className="ws-carte ws-tap" style={{background:'linear-gradient(180deg, ' + t.bg + ' 0%, #fffdf9 70%, #ffffff 100%)', border:'1px solid ' + C.bord, borderTop:'4px solid ' + t.color, borderRadius:18, padding:'20px 14px', minHeight:124, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', textAlign:'center', cursor:'pointer', transition:'border-color .3s'}}
                     onMouseEnter={e => { e.currentTarget.style.borderColor = t.color; }}
-                    onMouseLeave={e => { e.currentTarget.style.borderColor = C.bord; }}>
+                    onMouseLeave={e => { e.currentTarget.style.borderColor = C.bord; e.currentTarget.style.borderTopColor = t.color; }}>
                     <div style={{marginBottom:10, display:'flex', justifyContent:'center'}}><Pastille taille={58} fond={'radial-gradient(circle at 35% 30%, #ffffff, ' + t.bg + ' 75%)'}><TypeIcon id={t.id} color={t.color} size={34}/></Pastille></div>
                     <div style={{...serif, fontSize:22, color:C.ink, fontWeight:600}}>{t.label}</div>
                     {occasion === 'repas' && conseils && conseils[t.id] === 'conseille' && (

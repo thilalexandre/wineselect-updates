@@ -593,7 +593,7 @@ async function chatHorsLigne(messages) {
   const dernier = duClient[duClient.length - 1].content.toLowerCase();
   const plat = SOMMELIER.detectPairing(duClient);
   const budget = SOMMELIER.detectBudget(duClient);
-  const tranche = !budget ? '8-15' : budget.max <= 8 ? '-8' : budget.max <= 15 ? '8-15' : budget.max <= 25 ? '15-25' : budget.max <= 50 ? '25-50' : '50+';
+  const tranche = !budget ? '10-15' : budget.max <= 6 ? '-6' : budget.max <= 10 ? '6-10' : budget.max <= 15 ? '10-15' : budget.max <= 25 ? '15-25' : '25+';
   // Budget annoncé : sa fourchette exacte, jamais au-dessus du plafond (règle du sommelier).
   const fourchette = budget ? { min: budget.min, max: budget.openFloor ? budget.max : SOMMELIER.plafondBudget(budget) } : undefined;
   // Couleur, goût et occasion : mêmes règles que le chat (sommelier.js). L'ancien repérage

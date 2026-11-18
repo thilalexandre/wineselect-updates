@@ -602,13 +602,19 @@ async function repondreSommelier(body, env) {
 // choisit 3 vins DANS ce sous-ensemble en se basant sur les vraies données
 // du vin (cépage, région, notes de dégustation) plutôt que sur un simple
 // tri par prix — exactement le même travail que dans le chat.
+// Tranches de l'écran depuis le 18 nov. 2026 : moins de 6 €, 6-10, 10-15, 15-25, 25 € et plus
+// (rayons de supermarché : 60 % des vins du Super U sous 8 €, 5 vins seulement au-dessus de 50 €).
 const BUDGET_BRACKETS = {
+  '-6':    { min: 0,  max: 6   },
+  '6-10':  { min: 6,  max: 10  },
+  '10-15': { min: 10, max: 15  },
+  '15-25': { min: 15, max: 25  },
+  '25+':   { min: 25, max: Infinity },
+  // Anciennes tranches (jusqu'au 18 nov. 2026), gardées pour les tablettes pas encore redémarrées
   '-8':    { min: 0,  max: 8   },
   '8-15':  { min: 8,  max: 15  },
-  '15-25': { min: 15, max: 25  },
   '25-50': { min: 25, max: 50  },
   '50+':   { min: 50, max: Infinity },
-  '25+':   { min: 25, max: Infinity },   // ancienne tranche, gardée pour les écrans pas encore à jour
 };
 
 // Couleurs conseillées pour un plat de la liste (écran « Avez-vous une préférence ? »).
