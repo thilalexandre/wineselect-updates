@@ -696,7 +696,7 @@ app.post('/selection-accord', rateLimit(30), (req, res) => {
 // • Autonome : gardé dans data/ (aucun serveur où l'envoyer).
 // Le contrôle complet des valeurs est fait par le serveur central.
 const MODES_MESURE = ['guide', 'chat', 'surprise'];
-const TYPES_USAGE = ['session', 'ecran', 'etape', 'resultats', 'fiche', 'fin'];
+const TYPES_USAGE = ['session', 'ecran', 'etape', 'resultats', 'fiche', 'fin', 'autres'];
 const SESSION_VALIDE = /^[A-Za-z0-9_-]{8,40}$/;
 
 function lireFichierListe(fichier) {
@@ -786,6 +786,7 @@ app.post('/api/evenements', rateLimit(120, 'mesures'), (req, res) => {
   if (b.type === 'resultats') Object.assign(e, { mode: texteCourt(b.mode, 10), occasion: texteCourt(b.occasion, 20), budget: texteCourt(b.budget, 10), vins: listeVins(b.vins) });
   if (b.type === 'fiche') Object.assign(e, { mode: texteCourt(b.mode, 10), vin: entier(b.vin) });
   if (b.type === 'fin') Object.assign(e, { raison: texteCourt(b.raison, 15), duree_s: entier(b.duree_s) });
+  if (b.type === 'autres') Object.assign(e, { issue: texteCourt(b.issue, 10), serie: entier(b.serie) });   // « Voir 3 autres vins »
   enregistrer(FILE_USAGE, e, res);
 });
 

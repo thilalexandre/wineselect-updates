@@ -1371,9 +1371,10 @@ function vinsDeLaSelection(d) {
 }
 // Prépare l'affichage : clé de la question de satisfaction, mesure d'usage, et de quoi
 // demander « 3 autres vins » (la recherche et tous les vins déjà montrés).
-function preparerResultats(r, o, dejaVus) {
+// serie : 1 pour la première sélection, 2 après le premier « 3 autres vins »…
+function preparerResultats(r, o, dejaVus, serie) {
   r.avis = {cle: 'g' + Date.now() + '-' + Math.random().toString(36).slice(2, 8), occasion: o.occasion, budget: o.budget};
-  r.relance = {demande: o, vus: (dejaVus || []).concat(r.map(w => w.id))};
+  r.relance = {demande: o, vus: (dejaVus || []).concat(r.map(w => w.id)), serie: serie || 1};
   if (r.length) noterUsage('resultats', {mode:'guide', occasion: o.occasion, budget: o.budget, vins: r.map(w => w.id)});
   return r;
 }
@@ -1846,14 +1847,18 @@ function Results({results, setView, setResults}) {
     const rel = results.relance;
     if (!rel || relance === 'attente') return;
     setRelance('attente');
+    // Mesure anonyme de chaque appui : la série demandée et son issue (rien d'autre)
+    const serie = (rel.serie || 1) + 1;
+    const epuise = () => { setRelance('epuise'); noterUsage('autres', {issue:'epuise', serie: serie}); };
     demanderSelection(rel.demande, rel.vus)
       .then(d => {
-        if (d.info === 'plusDAutres' || !Array.isArray(d.ids) || !d.ids.length) { setRelance('epuise'); return; }
+        if (d.info === 'plusDAutres' || !Array.isArray(d.ids) || !d.ids.length) { epuise(); return; }
         const r = vinsDeLaSelection(d);
         // Jamais un vin déjà montré (serveur central pas encore à jour : il ignorerait exclureIds)
-        if (r.length < 3 || r.some(w => rel.vus.includes(w.id))) { setRelance('epuise'); return; }
+        if (r.length < 3 || r.some(w => rel.vus.includes(w.id))) { epuise(); return; }
         setRelance(null);
-        setResults(preparerResultats(r, rel.demande, rel.vus));
+        noterUsage('autres', {issue:'nouveaux', serie: serie});
+        setResults(preparerResultats(r, rel.demande, rel.vus, serie));
         window.scrollTo(0, 0);
       })
       .catch(() => setRelance('erreur'));

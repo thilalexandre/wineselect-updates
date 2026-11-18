@@ -130,7 +130,10 @@ function noterVin(wine, d) {
   const veto = raison => ({ score: -100, plus: [], moins: [raison] });
 
   const mer = d.proteine === 'poisson' || d.proteine === 'fruits de mer';
-  const foieGrasOuBleu = d.affinite_moelleux && d.gras >= 3 && ['canard', 'fromage'].includes(d.proteine);
+  // Foie gras reconnu aussi par son nom : l'analyse du plat (IA) ne le classe pas toujours
+  // en « canard, gras 3 », et les moelleux y perdaient 25 points (« trop sucré »).
+  const foieGrasOuBleu = (d.affinite_moelleux && d.gras >= 3 && ['canard', 'fromage'].includes(d.proteine)) ||
+    (/foie gras/i.test(d.plat || '') && d.proteine !== 'dessert');
   // Le foie gras n'est pas une viande rouge : pas de bonus tannique, pas de malus pour le blanc
   const viandeRouge = ['boeuf', 'agneau', 'gibier', 'canard'].includes(d.proteine) && !foieGrasOuBleu;
   const dessert = d.proteine === 'dessert' || d.sucre >= 2;
@@ -144,7 +147,9 @@ function noterVin(wine, d) {
   const rougeFondu = fromageFondu && t === 'rouge';
   const rougeLegerFondu = rougeFondu && p.tanins <= 1 && (p.corps === 1 || p.fraicheur === 3);
   // Plat très gras : un vin vif et plus léger « allège » (fondue + Apremont, choucroute + Riesling)
-  const allege = d.gras >= 3 && p.fraicheur === 3 && (t === 'blanc' || t === 'bulles');
+  // Pas sur le foie gras ou le bleu : l'accord classique y est la douceur, pas un blanc sec
+  // vif (un Chablis passait devant le Sauternes au Monoprix, 18 nov. 2026).
+  const allege = d.gras >= 3 && p.fraicheur === 3 && (t === 'blanc' || t === 'bulles') && !(foieGrasOuBleu && p.sucrosite === 0);
 
   // ─ Interdits absolus
   // Rouge sur le cru ou l'iodé : interdit, sauf si le client a explicitement demandé du rouge.
@@ -177,7 +182,7 @@ function noterVin(wine, d) {
     else if (p.sucrosite === d.sucre - 1) add(8, 'douceur proche du dessert');
   } else if (foieGrasOuBleu) {
     if (p.sucrosite >= 2) add(t === 'blanc' ? 22 : 10, 'accord doux classique');
-    else if (t === 'rouge') add(-8, null);
+    else if (t === 'rouge') add(p.tanins >= 2 ? -18 : -8, p.tanins >= 2 ? 'tanins durcis par le gras et le sel' : null);
   } else if (d.sucre === 1) {
     add([0, 12, 6, -10][p.sucrosite], ['', 'sa douceur répond au sucré-salé', 'sa douceur répond au sucré-salé', 'trop liquoreux pour un plat salé'][p.sucrosite] || null);
   } else if (p.sucrosite >= 2 && d.sucrosite_demandee == null) {
@@ -1051,7 +1056,14 @@ function candidatsGuides(wines, demande) {
   // (ex. rouge sur fruits de mer) : on garde les rares vins de la couleur qui passent
   // (rouges légers à servir frais) et on ajoute les meilleurs accords des autres couleurs.
   let compromis = null;
-  if (occasion === 'repas' && couleur && notes.filter(n => n.score >= REGLAGES.seuilAcceptable).length < 3) {
+  // … seulement si la couleur s'accorde mal avec le plat : une couleur bien accordée mais
+  // absente de la tranche (blanc sur foie gras à 50 € et plus, aucun blanc à ce prix) est
+  // complétée plus bas par des vins de SA couleur moins chers. Avant, le client recevait
+  // « du blanc se marie mal » et 3 champagnes (Super U, 18 nov. 2026).
+  const couleurMalAccordee = () => wines
+    .filter(w => w.type === couleur && w.price <= (ouvert ? Infinity : budget.max))
+    .map(w => noter(w)).filter(n => n.score >= REGLAGES.seuilAcceptable).length < 3;
+  if (occasion === 'repas' && couleur && notes.filter(n => n.score >= REGLAGES.seuilAcceptable).length < 3 && couleurMalAccordee()) {
     const autres = wines.filter(w => dansBudget(w) && w.type !== couleur)
       .map(w => Object.assign({ wine: w }, noter(w)))
       .filter(n => n.score >= REGLAGES.seuilCompatible)
@@ -1097,19 +1109,38 @@ function candidatsGuides(wines, demande) {
   // au-delà, le plus proche du budget d'abord. Sans cela, « 50 € et plus » sur un rayon
   // qui n'a que 2 rouges à ce prix ajoutait le meilleur accord du rayon… à 7,88 €.
   let horsBudget = false;
+  // Repas : des vins de la tranche sous le seuil acceptable ne comptent pas comme des
+  // propositions (ex. bleu à 50 € et plus au Super U : Côte-Rôtie à 54 sur 100). On garde
+  // les acceptables et le filet de sécurité complète avec de bons accords moins chers.
+  // Seulement sans couleur choisie : une couleur imposée et mal accordée (blanc sur bœuf)
+  // reste servie dans la tranche plutôt que par des vins bien moins chers.
+  if (occasion === 'repas' && !couleur && !compromis && retenus.filter(n => n.score >= REGLAGES.seuilAcceptable).length < 3) {
+    retenus = retenus.filter(n => n.score >= REGLAGES.seuilAcceptable);
+  }
   if (retenus.length < 3) {
     const deja = new Set(notes.map(n => n.wine.id));
     const plafond = ouvert ? Infinity : budget.max;
     const cible = budget.min;
     const proche = n => n.wine.price >= cible * 0.7;
-    const extra = wines
+    const tries = wines
       .filter(w => !deja.has(w.id) && w.price <= plafond && (couleurOk(w) || compromis))
       .map(w => Object.assign({ wine: w }, noter(w)))
       .filter(n => n.score >= REGLAGES.seuilAcceptable)
       .sort((a, b) => (proche(b) - proche(a)) ||
         (proche(a) ? (b.score - a.score) || (Math.abs(a.wine.price - cible) - Math.abs(b.wine.price - cible))
-                   : (Math.abs(a.wine.price - cible) - Math.abs(b.wine.price - cible)) || (b.score - a.score)))
-      .slice(0, 3 - retenus.length);
+                   : (Math.abs(a.wine.price - cible) - Math.abs(b.wine.price - cible)) || (b.score - a.score)));
+    const k = 3 - retenus.length;
+    const extra = tries.slice(0, k);
+    // Au moins 2 places à compléter et la dernière loin du budget : elle revient au meilleur
+    // accord du reste s'il est nettement meilleur (le plus cher des « accords idéaux » d'abord).
+    // Ex. blanc sur foie gras à 50 € et plus au Super U : le Sauternes à 16,89 € plutôt qu'un
+    // troisième blanc sec. Avec 1 seule place, rien ne change (cas du Larzac à 7,88 €).
+    if (k >= 2 && extra.length === k && !proche(extra[k - 1])) {
+      const palier = n => n.score >= 88 ? 0 : n.score >= 75 ? 1 : 2;
+      const meilleur = tries.slice(k).filter(n => n.score >= REGLAGES.seuilCompatible)
+        .sort((a, b) => (palier(a) - palier(b)) || (b.wine.price - a.wine.price))[0];
+      if (meilleur && meilleur.score >= extra[k - 1].score + 10) extra[k - 1] = meilleur;
+    }
     if (extra.length) {
       horsBudget = true;
       notes = notes.concat(extra);
@@ -1366,9 +1397,12 @@ async function selectionGuidee(body, bracket, featuredSet, res, env) {
   const nbGardes = c.compromis ? Math.min(2, candidates.filter(w => w.type === c.compromis.couleur).length) : 0;
   if (c.horsBudget) {
     contexte += ' Certains vins de la liste sont un peu hors de la tranche choisie, faute de mieux : si tu en retiens un, signale-le dans "message" en nommant le vin (jamais son ID).';
+    // Le filet de sécurité descend sous la tranche (jamais au-dessus, sauf rayon vide) : on le dit
+    const auDessus = candidates.some(w => bracket.max !== Infinity ? w.price > bracket.max : false);
+    const precision = auDessus ? 'certains sont hors de votre budget.' : 'certains coûtent moins que votre budget.';
     if (!messageInfo) messageInfo = occasion === 'repas'
-      ? 'Peu de vins de cette tranche conviennent à ce plat : certains sont légèrement hors budget.'
-      : 'Peu de vins de ce style dans cette tranche : certains sont hors de votre budget.';
+      ? (demande.couleur ? 'Peu de ' + PLURIEL[demande.couleur] + ' de cette tranche au rayon pour ce plat : ' : 'Peu de vins de cette tranche conviennent à ce plat : ') + precision
+      : 'Peu de vins de ce style dans cette tranche : ' + precision;
   }
   if (c.sousBudget) {
     contexte += ' Les rosés tendres (demi-secs) sont des vins d\'entrée de gamme : certains vins de la liste coûtent moins que la tranche choisie. Retiens en priorité les demi-secs et dis-le simplement dans "message" en nommant les vins (jamais leur ID).';
