@@ -473,15 +473,31 @@ const PREFIXE_PHOTO = 'photos-magasin/';
 const DOSSIER_PHOTOS = path.join(DOSSIER_CACHE, 'photos');
 const NOM_PHOTO = /^[\w-]{1,64}\.(png|jpe?g|webp)$/i;
 const TYPES_PHOTO = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp' };
+// Pour l'écran de dépannage : dernière photo que le central n'a pas pu donner.
+const ETAT_PHOTOS = { dernierEchec: null };
+// Photos attendues par le catalogue (servies par le central) et déjà sur la borne.
+function bilanPhotos() {
+  const attendues = [...new Set(BASE_CATALOG.map(w => String(w.photo || ''))
+    .filter(p => p.startsWith(PREFIXE_PHOTO)).map(p => p.slice(PREFIXE_PHOTO.length)))]
+    .filter(f => NOM_PHOTO.test(f));
+  const presentes = attendues.filter(f => fs.existsSync(path.join(DOSSIER_PHOTOS, f))).length;
+  return { attendues: attendues.length, presentes, enCours: photosEnCours, dernierEchec: ETAT_PHOTOS.dernierEchec };
+}
 async function telechargerPhoto(fichier) {
   if (!CONNEXION || !NOM_PHOTO.test(fichier)) return false;
   const r = await fetch(CONNEXION.serveur + '/api/borne/photos/' + encodeURIComponent(fichier), {
     headers: { Authorization: 'Bearer ' + CONNEXION.jeton, 'X-WineSelect-Version': VERSION_BORNE },
     signal: AbortSignal.timeout(20000),
   });
-  if (r.status !== 200 || !/^image\//.test(r.headers.get('content-type') || '')) return false;
+  if (r.status !== 200 || !/^image\//.test(r.headers.get('content-type') || '')) {
+    ETAT_PHOTOS.dernierEchec = { fichier, raison: 'HTTP ' + r.status, le: new Date().toISOString() };
+    return false;
+  }
   const contenu = Buffer.from(await r.arrayBuffer());
-  if (!contenu.length || contenu.length > 5 * 1024 * 1024) return false;
+  if (!contenu.length || contenu.length > 5 * 1024 * 1024) {
+    ETAT_PHOTOS.dernierEchec = { fichier, raison: 'fichier vide ou trop lourd', le: new Date().toISOString() };
+    return false;
+  }
   fs.mkdirSync(DOSSIER_PHOTOS, { recursive: true });
   const cible = path.join(DOSSIER_PHOTOS, fichier);
   fs.writeFileSync(cible + '.tmp', contenu);
@@ -498,7 +514,10 @@ async function telechargerPhotosManquantes(vins) {
       .filter(p => p.startsWith(PREFIXE_PHOTO)).map(p => p.slice(PREFIXE_PHOTO.length)))]
       .filter(f => NOM_PHOTO.test(f) && !fs.existsSync(path.join(DOSSIER_PHOTOS, f)));
     for (const f of fichiers) {
-      try { if (await telechargerPhoto(f)) recues++; } catch (e) { break; } // central injoignable : on reprendra
+      try { if (await telechargerPhoto(f)) recues++; } catch (e) { // central injoignable : on reprendra
+        ETAT_PHOTOS.dernierEchec = { fichier: f, raison: e.message, le: new Date().toISOString() };
+        break;
+      }
     }
     if (recues) console.log('🖼  Photos : ' + recues + ' reçue(s) du serveur central');
   } finally { photosEnCours = false; }
@@ -854,6 +873,7 @@ function etatBorne() {
     magasin: ETAT_CENTRAL.magasin,
     catalogue: { vins: WINES_CATALOG.length, version: CONNEXION ? ETAT_CENTRAL.versionCatalogue : null },
     synchro: CONNEXION ? { joignable: ETAT_CENTRAL.joignable, derniere: ETAT_CENTRAL.derniereSynchro, erreur: ETAT_CENTRAL.derniereErreur } : null,
+    photos: bilanPhotos(),
     sommelier: CONNEXION ? 'serveur central' : (CONFIG.apiKey ? 'IA sur la borne' : 'sans IA'),
     codeDepannageDefini: codeDefini,
   };

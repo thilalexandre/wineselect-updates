@@ -2301,6 +2301,8 @@ function Depannage({setView}) {
               {etat.synchro && ligne('Serveur joignable', etat.synchro.joignable ? 'oui' : (etat.synchro.joignable === false ? 'non' : 'pas encore vérifié'), etat.synchro.joignable === false)}
               {etat.synchro && ligne('Dernière synchronisation', dateHeure(etat.synchro.derniere))}
               {etat.synchro && etat.synchro.erreur && ligne('Dernière erreur', etat.synchro.erreur, true)}
+              {etat.photos && etat.photos.attendues > 0 && ligne('Photos', etat.photos.presentes + ' sur ' + etat.photos.attendues + ' sur la tablette' + (etat.photos.enCours ? ' (téléchargement en cours)' : ''), etat.photos.presentes < etat.photos.attendues && !etat.photos.enCours)}
+              {etat.photos && etat.photos.dernierEchec && ligne('Photo refusée', etat.photos.dernierEchec.fichier + ' : ' + etat.photos.dernierEchec.raison + ' (' + dateHeure(etat.photos.dernierEchec.le) + ')', true)}
               {ligne('Sommelier', etat.sommelier)}
               {etat.mode === 'connecte' && !etat.codeDepannageDefini && ligne('Code de dépannage', 'non défini', true)}
               {ligne('Version de la borne', etat.versionBorne)}
