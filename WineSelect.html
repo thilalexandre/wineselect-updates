@@ -1340,6 +1340,44 @@ function OccasionIcon({id, size=30, color}) {
   return null;
 }
 
+// ── Appel de la sélection guidée (première sélection et « 3 autres vins ») ────
+// Rôles de repli si le serveur n'en donne pas : le moins cher = valeur sûre.
+function rolesDeRepli(wines) {
+  if (wines.length < 3) return wines;
+  const byPrice = [...wines].sort((a,b) => a.price - b.price);
+  const roles = {[byPrice[0].id]:'valeur_sure'};
+  const rest = wines.filter(w => w.id !== byPrice[0].id);
+  roles[rest[0].id] = 'coup_de_coeur';
+  roles[rest[1].id] = 'decouverte';
+  return wines.map(w => ({...w, aiRole: roles[w.id]}));
+}
+// exclureIds : vins déjà montrés pour cette recherche (« 3 autres vins »)
+function demanderSelection(o, exclureIds) {
+  const corps = Object.assign({}, o, {featuredIds: WINES.filter(w => w.featured).map(w => w.id)});
+  if (exclureIds && exclureIds.length) corps.exclureIds = exclureIds;
+  return fetch('http://localhost:3000/selection-accord', {
+    method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(corps),
+  }).then(res => { if (!res.ok) throw new Error('api'); return res.json(); });
+}
+// Réponse du serveur → vins affichés (avec rôle, raison et niveau d'accord)
+function vinsDeLaSelection(d) {
+  if (d.error || !Array.isArray(d.ids)) throw new Error(d.error || 'réponse invalide');
+  let r = d.ids.map(id => WINES.find(w => w.id === id)).filter(Boolean);
+  if (d.roles && r.every(w => d.roles[w.id])) r = r.map(w => ({...w, aiReason:(d.reasons||{})[w.id], aiRole:d.roles[w.id]}));
+  else r = rolesDeRepli(r).map(w => ({...w, aiReason:(d.reasons||{})[w.id]}));
+  r = r.map(w => ({...w, accord:(d.niveaux||{})[w.id]}));
+  r.message = d.message || '';
+  return r;
+}
+// Prépare l'affichage : clé de la question de satisfaction, mesure d'usage, et de quoi
+// demander « 3 autres vins » (la recherche et tous les vins déjà montrés).
+function preparerResultats(r, o, dejaVus) {
+  r.avis = {cle: 'g' + Date.now() + '-' + Math.random().toString(36).slice(2, 8), occasion: o.occasion, budget: o.budget};
+  r.relance = {demande: o, vus: (dejaVus || []).concat(r.map(w => w.id))};
+  if (r.length) noterUsage('resultats', {mode:'guide', occasion: o.occasion, budget: o.budget, vins: r.map(w => w.id)});
+  return r;
+}
+
 function Selection({setView, setResults, depart}) {
   const C = C_IVOIRE;   // écran en direction « Ivoire épuré »
   // depart 'noel' : raccourci « Menu des fêtes » de l'accueil, on ouvre directement le choix
@@ -1433,15 +1471,7 @@ function Selection({setView, setResults, depart}) {
   };
 
   // ── Repli local si le serveur ne répond pas ──────────────────────────────
-  const withFallbackRoles = wines => {
-    if (wines.length < 3) return wines;
-    const byPrice = [...wines].sort((a,b) => a.price - b.price);
-    const roles = {[byPrice[0].id]:'valeur_sure'};
-    const rest = wines.filter(w => w.id !== byPrice[0].id);
-    roles[rest[0].id] = 'coup_de_coeur';
-    roles[rest[1].id] = 'decouverte';
-    return wines.map(w => ({...w, aiRole: roles[w.id]}));
-  };
+  const withFallbackRoles = rolesDeRepli;
   const localFallback = o => {
     const rec = RECETTES_UI.find(x => x.id === o.recette);
     const type = o.couleur || (o.occasion === 'cuisiner' && rec ? rec.couleur : null);
@@ -1468,30 +1498,16 @@ function Selection({setView, setResults, depart}) {
     setScreen('thinking');
     // Chaque sélection affichée reçoit sa propre clé : la question de satisfaction
     // n'y est posée qu'une fois.
-    const afficher = r => {
-      r.avis = {cle: 'g' + Date.now() + '-' + Math.random().toString(36).slice(2, 8), occasion: o.occasion, budget: o.budget};
-      if (r.length) noterUsage('resultats', {mode:'guide', occasion: o.occasion, budget: o.budget, vins: r.map(w => w.id)});
-      setResults(r); setView('results');
-    };
-    fetch('http://localhost:3000/selection-accord', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify(Object.assign({}, o, {featuredIds: WINES.filter(w => w.featured).map(w => w.id)})),
-    })
-      .then(res => { if (!res.ok) throw new Error('api'); return res.json(); })
+    const afficher = r => { setResults(preparerResultats(r, o)); setView('results'); };
+    demanderSelection(o)
       .then(d => {
         if (d.info === 'sansVin') { setInfo({plat: d.plat || o.recetteLibre}); setScreen('info'); return; }
-        if (d.error || !Array.isArray(d.ids)) throw new Error(d.error || 'réponse invalide');
-        let r = d.ids.map(id => WINES.find(w => w.id === id)).filter(Boolean);
         // Pas de repli local ici : si le moteur d'accords renvoie peu de vins, c'est qu'il a
         // écarté les autres volontairement (ex. rouge tannique sur fruits de mer). Le repli
         // local (filtre prix/couleur sans accord) ne sert qu'en cas de panne du serveur
         // ou de réponse vide (jamais d'écran sans vin).
-        if (!r.length) r = localFallback(o);
-        else if (d.roles && r.every(w => d.roles[w.id])) r = r.map(w => ({...w, aiReason:(d.reasons||{})[w.id], aiRole:d.roles[w.id]}));
-        else r = withFallbackRoles(r).map(w => ({...w, aiReason:(d.reasons||{})[w.id]}));
-        r = r.map(w => ({...w, accord:(d.niveaux||{})[w.id]}));
-        r.message = d.message || '';
-        afficher(r);
+        const r = vinsDeLaSelection(d);
+        afficher(r.length ? r : localFallback(o));
       })
       .catch(e => { console.warn('Sélection guidée : repli local (' + e.message + ')'); afficher(localFallback(o)); });
   };
@@ -1822,8 +1838,26 @@ function QuestionAvis({cle, mode, occasion, budget, vins}) {
 }
 
 // ── RESULTS ───────────────────────────────────────────────────────────────────
-function Results({results, setView}) {
+function Results({results, setView, setResults}) {
   const [modal, setModal] = useState(null);
+  // « 3 autres vins » : même recherche, sans les vins déjà montrés
+  const [relance, setRelance] = useState(null);   // null, 'attente', 'epuise', 'erreur'
+  const autresVins = () => {
+    const rel = results.relance;
+    if (!rel || relance === 'attente') return;
+    setRelance('attente');
+    demanderSelection(rel.demande, rel.vus)
+      .then(d => {
+        if (d.info === 'plusDAutres' || !Array.isArray(d.ids) || !d.ids.length) { setRelance('epuise'); return; }
+        const r = vinsDeLaSelection(d);
+        // Jamais un vin déjà montré (serveur central pas encore à jour : il ignorerait exclureIds)
+        if (r.length < 3 || r.some(w => rel.vus.includes(w.id))) { setRelance('epuise'); return; }
+        setRelance(null);
+        setResults(preparerResultats(r, rel.demande, rel.vus));
+        window.scrollTo(0, 0);
+      })
+      .catch(() => setRelance('erreur'));
+  };
   const ouvrir = w => { setModal(w); noterUsage('fiche', {mode:'guide', vin:w.id}); };
   // Le libellé vient du rôle réel du vin (aiRole, assigné par le sommelier ou par
   // l'heuristique de repli) — jamais de sa position dans le tableau. Le
@@ -1941,8 +1975,21 @@ function Results({results, setView}) {
           </div>
         )}
 
+        {/* Trois autres vins pour la même recherche */}
+        {results.relance && (
+          <div style={{marginTop:22, textAlign:'center'}}>
+            {relance === 'epuise'
+              ? <p style={{margin:0, fontSize:13, lineHeight:1.6, color:IV.body, background:IV.soft, borderRadius:12, padding:'12px 16px'}}>{"Vous avez vu tous les vins du rayon qui répondent à votre recherche. Pour d'autres idées, changez de budget ou demandez au sommelier."}</p>
+              : <button onClick={autresVins} disabled={relance === 'attente'} className="ws-tap" style={{...sans, display:'inline-flex', alignItems:'center', justifyContent:'center', gap:10, minHeight:58, padding:'0 30px', background:IV.surface, border:'1.5px solid '+IV.wine, borderRadius:999, color:IV.wine, fontSize:15, fontWeight:600, letterSpacing:'.03em', cursor:relance === 'attente' ? 'default' : 'pointer', opacity:relance === 'attente' ? .6 : 1}}>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 0 0-14.6-4.5M4 4v4h4"/><path d="M4 13a8 8 0 0 0 14.6 4.5M20 20v-4h-4"/></svg>
+                  {relance === 'attente' ? 'Le sommelier cherche…' : 'Voir 3 autres vins'}
+                </button>}
+            {relance === 'erreur' && <p style={{margin:'10px 0 0', fontSize:13, color:IV.muted}}>Le sommelier ne répond pas pour le moment. Réessayez dans un instant.</p>}
+          </div>
+        )}
+
         {/* Satisfaction : une réponse par sélection */}
-        {results.avis && <QuestionAvis cle={results.avis.cle} mode="guide" occasion={results.avis.occasion} budget={results.avis.budget} vins={results.map(w => w.id)}/>}
+        {results.avis && <QuestionAvis key={results.avis.cle} cle={results.avis.cle} mode="guide" occasion={results.avis.occasion} budget={results.avis.budget} vins={results.map(w => w.id)}/>}
 
         {/* Actions */}
         <div style={{marginTop:results.avis ? 12 : 28, display:'flex', gap:12, flexWrap:'wrap'}}>
@@ -2431,7 +2478,7 @@ function App() {
       <style>{'@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-10px)}}@keyframes shimmer{0%{background-position:-200% 0}100%{background-position:200% 0}}*{box-sizing:border-box}::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:rgba(212,175,55,.35);border-radius:2px}'}</style>
       {view==='home'      && <Home          setView={setView} ouvrirFetes={()=>{ setDepart('noel'); setView('selection'); }}/>}
       {view==='selection' && <Selection     setView={setView} setResults={setResults} depart={depart}/>}
-      {view==='results'   && <Results       setView={setView} results={results}/>}
+      {view==='results'   && <Results       setView={setView} results={results} setResults={setResults}/>}
       {view==='mystery'   && <Mystery       setView={setView}/>}
       {view==='chat'      && <Chat          setView={setView}/>}
       {view==='depannage' && <Depannage setView={setView}/>}

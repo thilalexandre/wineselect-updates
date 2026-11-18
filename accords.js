@@ -1338,6 +1338,15 @@ async function selectionGuidee(body, bracket, featuredSet, res, env) {
 
   const c = ACCORDS.candidatsGuides(WINES_CATALOG, demande);
   const candidates = c.candidats;
+  // « 3 autres vins » : seulement s'il reste 3 vins qui répondent vraiment à la recherche.
+  // Le moteur sortirait sinon de la tranche (filet de sécurité de la première sélection) :
+  // le client garde alors les vins déjà proposés, avec un message. Même chose si la couleur
+  // choisie n'a plus assez de vins (le compromis ferait entrer d'autres couleurs).
+  const autres = Array.isArray(body.exclureIds) && body.exclureIds.length > 0;
+  if (autres && (c.horsBudget || c.compromis || candidates.length < 3)) {
+    console.log('🔁 Autres vins : plus assez de vins qui répondent à la recherche');
+    return res.json({ ids: [], info: 'plusDAutres' });
+  }
   let messageInfo = '';
   if (c.compromis) {
     const col = c.compromis.couleur;

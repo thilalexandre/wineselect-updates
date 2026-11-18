@@ -641,13 +641,19 @@ function profilsVins(env) {
 // Sélection guidée (route /selection-accord). Renvoie { status, body }.
 async function selectionAccord(body, env) {
   const callApi = env.callApi || appelHttps;
-  const WINES_CATALOG = vinsProposables(env.catalogue, formatDuCorps(body.format)), CONFIG = env.config;   // 75 cl, sauf chat hors connexion
+  const proposables = vinsProposables(env.catalogue, formatDuCorps(body.format)), CONFIG = env.config;   // 75 cl, sauf chat hors connexion
   const { type, budget, pairing, detail, featuredIds } = body;
   const featuredSet = new Set(Array.isArray(featuredIds) ? featuredIds : []);
 
-  if (!WINES_CATALOG.length) {
+  if (!proposables.length) {
     return { status: 500, body: { error: 'catalogue non chargé' } };
   }
+  // « 3 autres vins » : l'écran envoie les vins déjà montrés pour la même recherche.
+  // Ils sont retirés du rayon ; tout le reste (budget, couleur, accord) s'applique à l'identique.
+  const exclus = new Set((Array.isArray(body.exclureIds) ? body.exclureIds : [])
+    .filter(id => typeof id === 'number' || typeof id === 'string').slice(0, 100));
+  const WINES_CATALOG = exclus.size ? proposables.filter(w => !exclus.has(w.id)) : proposables;
+  if (exclus.size && WINES_CATALOG.length < 3) return { status: 200, body: { ids: [], info: 'plusDAutres' } };
   // « fourchette » (facultative) : budget exact repéré dans une phrase du client
   // (chat de la borne hors connexion), à la place d'une tranche de la sélection guidée.
   const f = body.fourchette;
