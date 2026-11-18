@@ -68,13 +68,15 @@ WINES.forEach(w=>{ w.budget = budgetForPrice(w.price); });
 // RÈGLE UNIQUE D'IDENTITÉ D'UN VIN (comme sur une étiquette) :
 //   titre    = la cuvée si elle existe, sinon le producteur (Château, Domaine,
 //              Maison...), sinon le nom du catalogue ;
-//   surtitre = le producteur, seulement quand il y a une cuvée ;
-//   détails  = appellation · millésime · région · cépage.
+//   surtitre = le producteur quand il y a une cuvée ; à défaut de producteur,
+//              l'appellation (« CHÂTEAUNEUF-DU-PAPE » au-dessus de « Jean XXII »,
+//              comme sur l'étiquette : une cuvée seule ne dit pas ce qu'est le vin) ;
+//   détails  = appellation (sauf si déjà en surtitre) · millésime · région · cépage.
 // Le libellé complet (libelleVin) est le nom que le sommelier écrit dans le chat.
 // ⚠️ libelleVin existe en double dans serveur.js : les deux doivent rester identiques.
 const nomVin = w => !w ? '' : w.cuvee ? String(w.cuvee) : w.domaine ? String(w.domaine) : w.name;
-const surtitreVin = w => (w && w.cuvee && w.domaine) ? String(w.domaine) : '';
-const detailsVin = w => [(w.cuvee || w.domaine) ? w.appellation : null, w.millesime, w.region, w.grape].filter(Boolean).join(' · ');
+const surtitreVin = w => !(w && w.cuvee) ? '' : w.domaine ? String(w.domaine) : (w.appellation ? String(w.appellation) : '');
+const detailsVin = w => [(w.cuvee || w.domaine) && !(w.cuvee && !w.domaine) ? w.appellation : null, w.millesime, w.region, w.grape].filter(Boolean).join(' · ');
 function libelleVin(w) {
   if (!w) return '';
   if (!w.domaine && !w.cuvee) return w.millesime ? w.name + ' ' + w.millesime : w.name;
