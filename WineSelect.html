@@ -1916,10 +1916,11 @@ function QuestionAvis({cle, mode, occasion, budget, vins}) {
 }
 
 // ── RESULTS ───────────────────────────────────────────────────────────────────
-function Results({results, setView, setResults}) {
+function Results({results, setView, setResults, setOccupe}) {
   const [modal, setModal] = useState(null);
   // « 3 autres vins » : même recherche, sans les vins déjà montrés
   const [relance, setRelance] = useState(null);   // null, 'attente', 'epuise', 'erreur'
+  useEffect(() => { if (setOccupe) setOccupe(relance === 'attente'); }, [relance]);
   const autresVins = () => {
     const rel = results.relance;
     if (!rel || relance === 'attente') return;
@@ -2140,12 +2141,13 @@ function Mystery({setView}) {
 }
 
 // ── CHAT ──────────────────────────────────────────────────────────────────────
-function Chat({setView}) {
+function Chat({setView, setOccupe}) {
   // RGPD : rien sur le client dans les messages (ils sont transmis à l'API IA)
   const initMsg = {role:'assistant', text:"Bonjour, je suis le sommelier de votre magasin.\n\nDites-moi ce que vous préparez, votre budget ou vos goûts : je vous propose trois vins de notre rayon.", wines:[]};
   const [msgs,    setMsgs]    = useState([initMsg]);
   const [input,   setInput]   = useState('');
   const [loading, setLoading] = useState(false);
+  useEffect(() => { if (setOccupe) setOccupe(loading); }, [loading]);
   const [modal,   setModal]   = useState(null);
   const bottomRef = useRef(null);
   const {mic, toggle, transcript, erreur: erreurMicro} = useMic((text, isVoice) => send(text, isVoice));
@@ -2480,6 +2482,10 @@ function Depannage({setView}) {
 // ── APP ───────────────────────────────────────────────────────────────────────
 function App() {
   const [view,    setView]    = useState('home');
+  // Le sommelier répond (chat) ou cherche 3 autres vins (résultats) : « J'ai terminé » est masqué,
+  // pour ne pas interrompre la réponse (25 nov. 2026).
+  const [sommelierOccupe, setSommelierOccupe] = useState(false);
+  useEffect(() => { setSommelierOccupe(false); }, [view]);
   // Mesure : écran affiché pendant la session. La sélection guidée est suivie par
   // ses étapes (notées par Selection), plus précises que l'écran lui-même.
   useEffect(() => {
@@ -2560,14 +2566,14 @@ function App() {
       <style>{'@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-10px)}}@keyframes shimmer{0%{background-position:-200% 0}100%{background-position:200% 0}}*{box-sizing:border-box}::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:rgba(212,175,55,.35);border-radius:2px}'}</style>
       {view==='home'      && <Home          setView={setView} ouvrirFetes={()=>{ setDepart('noel'); setView('selection'); }}/>}
       {view==='selection' && <Selection     setView={setView} setResults={setResults} depart={depart}/>}
-      {view==='results'   && <Results       setView={setView} results={results} setResults={setResults}/>}
+      {view==='results'   && <Results       setView={setView} results={results} setResults={setResults} setOccupe={setSommelierOccupe}/>}
       {view==='mystery'   && <Mystery       setView={setView}/>}
-      {view==='chat'      && <Chat          setView={setView}/>}
+      {view==='chat'      && <Chat          setView={setView} setOccupe={setSommelierOccupe}/>}
       {view==='depannage' && <Depannage setView={setView}/>}
       {/* « J'ai terminé » seulement une fois des vins montrés : pendant les questions et la recherche du
           sommelier, ce bouton bordeaux en bas d'écran passait pour « Valider » et des clients
           abandonnaient avant les résultats (Monoprix, 25 nov. 2026). Les questions gardent « Retour ». */}
-      {(view==='results' || view==='mystery' || view==='chat') && (
+      {(view==='results' || view==='mystery' || view==='chat') && !sommelierOccupe && (
         <button
           onClick={()=>{ terminerSession('termine'); setResults([]); setView('home'); try{ sessionStorage.removeItem('ws_age_ok'); }catch(e){} setAgeOk(false); }}
           style={{position:'fixed', ...(view==='chat' ? {top:22} : {bottom:56}), right:'max(20px, calc(50% - 316px))', zIndex:50, minHeight:46, background:view==='chat' ? '#ffffff' : C.wine, color:view==='chat' ? C.wine : '#faf6ee', border:'1px solid ' + C.wine, borderRadius:999, padding:'0 22px', fontSize:13, fontWeight:500, letterSpacing:'.03em', cursor:'pointer', boxShadow:view==='chat' ? 'none' : '0 12px 30px rgba(94,22,34,.22)', fontFamily:'Montserrat,sans-serif'}}
