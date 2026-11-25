@@ -2564,7 +2564,10 @@ function App() {
       {view==='mystery'   && <Mystery       setView={setView}/>}
       {view==='chat'      && <Chat          setView={setView}/>}
       {view==='depannage' && <Depannage setView={setView}/>}
-      {view!=='home' && view!=='depannage' && (
+      {/* « J'ai terminé » seulement une fois des vins montrés : pendant les questions et la recherche du
+          sommelier, ce bouton bordeaux en bas d'écran passait pour « Valider » et des clients
+          abandonnaient avant les résultats (Monoprix, 25 nov. 2026). Les questions gardent « Retour ». */}
+      {(view==='results' || view==='mystery' || view==='chat') && (
         <button
           onClick={()=>{ terminerSession('termine'); setResults([]); setView('home'); try{ sessionStorage.removeItem('ws_age_ok'); }catch(e){} setAgeOk(false); }}
           style={{position:'fixed', ...(view==='chat' ? {top:22} : {bottom:56}), right:'max(20px, calc(50% - 316px))', zIndex:50, minHeight:46, background:view==='chat' ? '#ffffff' : C.wine, color:view==='chat' ? C.wine : '#faf6ee', border:'1px solid ' + C.wine, borderRadius:999, padding:'0 22px', fontSize:13, fontWeight:500, letterSpacing:'.03em', cursor:'pointer', boxShadow:view==='chat' ? 'none' : '0 12px 30px rgba(94,22,34,.22)', fontFamily:'Montserrat,sans-serif'}}
