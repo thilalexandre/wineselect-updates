@@ -411,7 +411,7 @@ function applyStockOverridesBase() {
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  MODE CONNECTÉ : catalogue et sommelier du serveur central
-//  • Au démarrage puis toutes les 5 minutes : la borne demande la version du
+//  • Au démarrage puis chaque minute : la borne demande la version du
 //    catalogue de son magasin, le télécharge s'il a changé et en garde une copie
 //    (cache-central/). C'est aussi le « signe de vie » vu dans le back office.
 //  • Sommelier et sélection guidée : transmis au serveur central. S'il ne répond
@@ -423,7 +423,9 @@ function applyStockOverridesBase() {
 const DOSSIER_CACHE = path.resolve(process.env.WINESELECT_CACHE || path.join(__dirname, 'cache-central'));
 const FICHIER_CACHE_CATALOGUE = path.join(DOSSIER_CACHE, 'catalogue.json');
 const FICHIER_CACHE_CONFIG = path.join(DOSSIER_CACHE, 'config.json');
-const SYNCHRO_MS = (parseFloat(process.env.WINESELECT_SYNCHRO_SECONDES) || 300) * 1000;
+// Chaque minute (avant le 18 nov. 2026 : 5 min ; un import mettait jusqu'à ~10 min
+// à paraître sur la tablette). Appel léger : version du catalogue seulement.
+const SYNCHRO_MS = (parseFloat(process.env.WINESELECT_SYNCHRO_SECONDES) || 60) * 1000;
 const ETAT_CENTRAL = { versionCatalogue: null, derniereSynchro: null, joignable: null, derniereErreur: null, magasin: null };
 
 async function appelCentral(chemin, options) {
@@ -500,8 +502,10 @@ async function telechargerPhoto(fichier) {
   }
   fs.mkdirSync(DOSSIER_PHOTOS, { recursive: true });
   const cible = path.join(DOSSIER_PHOTOS, fichier);
-  fs.writeFileSync(cible + '.tmp', contenu);
-  fs.renameSync(cible + '.tmp', cible);
+  // fichier temporaire propre à ce téléchargement : la même photo peut être demandée en même temps par l'écran
+  const tmp = cible + '.' + Math.random().toString(36).slice(2, 8) + '.tmp';
+  fs.writeFileSync(tmp, contenu);
+  fs.renameSync(tmp, cible);
   return true;
 }
 let photosEnCours = false;
@@ -513,12 +517,18 @@ async function telechargerPhotosManquantes(vins) {
     const fichiers = [...new Set((vins || []).map(w => String(w.photo || ''))
       .filter(p => p.startsWith(PREFIXE_PHOTO)).map(p => p.slice(PREFIXE_PHOTO.length)))]
       .filter(f => NOM_PHOTO.test(f) && !fs.existsSync(path.join(DOSSIER_PHOTOS, f)));
-    for (const f of fichiers) {
-      try { if (await telechargerPhoto(f)) recues++; } catch (e) { // central injoignable : on reprendra
-        ETAT_PHOTOS.dernierEchec = { fichier: f, raison: e.message, le: new Date().toISOString() };
-        break;
+    // 4 téléchargements à la fois (25 nov. 2026 : 633 nouvelles photos d'un coup au Monoprix,
+    // une par une, laissaient des espaces vides plusieurs minutes) ; central injoignable : on reprendra.
+    let i = 0, arret = false;
+    await Promise.all(Array.from({ length: 4 }, async () => {
+      while (!arret && i < fichiers.length) {
+        const f = fichiers[i++];
+        try { if (await telechargerPhoto(f)) recues++; } catch (e) {
+          ETAT_PHOTOS.dernierEchec = { fichier: f, raison: e.message, le: new Date().toISOString() };
+          arret = true;
+        }
       }
-    }
+    }));
     if (recues) console.log('🖼  Photos : ' + recues + ' reçue(s) du serveur central');
   } finally { photosEnCours = false; }
 }
@@ -690,8 +700,8 @@ app.post('/selection-accord', rateLimit(30), (req, res) => {
 // La borne ajoute à chaque envoi un identifiant tiré au hasard (uid : un envoi
 // répété n'est compté qu'une fois) et l'heure de réception.
 // • Connectée : file d'attente sur le disque (cache-central/), envoyée tout de
-//   suite au serveur central, sinon à la prochaine synchronisation réussie (toutes
-//   les 5 minutes). Une réinstallation depuis l'écran de dépannage vide ces files
+//   suite au serveur central, sinon à la prochaine synchronisation réussie (chaque
+//   minute). Une réinstallation depuis l'écran de dépannage vide ces files
 //   avec la copie du catalogue : rien ne part jamais vers un autre magasin.
 // • Autonome : gardé dans data/ (aucun serveur où l'envoyer).
 // Le contrôle complet des valeurs est fait par le serveur central.
@@ -826,7 +836,7 @@ const server = app.listen(PORT, () => {
   if (CONNEXION) demarrerSynchro();
 });
 
-// Synchronisation avec le serveur central : tout de suite, puis toutes les 5 minutes.
+// Synchronisation avec le serveur central : tout de suite, puis chaque minute.
 let minuterieSynchro = null;
 function demarrerSynchro() {
   synchroniser();

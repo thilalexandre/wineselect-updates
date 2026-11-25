@@ -101,13 +101,21 @@ const AGRANDISSEMENT_PHOTO_MAX = 2;
 function PhotoVin({wine, h}) {
   const [erreur, setErreur] = useState(false);
   const [hauteurNette, setHauteurNette] = useState(null);
-  useEffect(() => { setErreur(false); setHauteurNette(null); }, [wine.photo]);
+  const refImage = useRef(null);
+  const densite = (window.devicePixelRatio || 1) * (parseFloat(document.documentElement.style.zoom) || 1);
+  const mesurer = im => { if (im && im.complete && im.naturalHeight) setHauteurNette(Math.floor(im.naturalHeight * AGRANDISSEMENT_PHOTO_MAX / densite)); };
+  // Une photo déjà en cache peut finir de charger AVANT cet effet : on la mesure tout de suite.
+  useEffect(() => { setErreur(false); setHauteurNette(null); mesurer(refImage.current); }, [wine.photo]);
   if (wine.photo && !erreur) {
-    const densite = (window.devicePixelRatio || 1) * (parseFloat(document.documentElement.style.zoom) || 1);
-    return <img src={wine.photo} alt={'Bouteille ' + nomVin(wine)} onError={()=>setErreur(true)}
-      onLoad={e => setHauteurNette(Math.floor(e.currentTarget.naturalHeight * AGRANDISSEMENT_PHOTO_MAX / densite))}
-      style={{height: hauteurNette ? Math.min(h, hauteurNette) : 'auto', maxHeight:h, width:'auto', maxWidth:'100%',
-        objectFit:'contain', display:'block', visibility: hauteurNette ? 'visible' : 'hidden'}}/>;
+    // En attendant la photo (téléchargée du serveur central à son premier affichage), la bouteille
+    // dessinée occupe la place : jamais d'espace vide (25 nov. 2026). L'image, masquée, charge quand même.
+    return <>
+      {!hauteurNette && <Bottle wine={wine} h={h} label={true}/>}
+      <img ref={refImage} src={wine.photo} alt={'Bouteille ' + nomVin(wine)} onError={()=>setErreur(true)}
+        onLoad={e => mesurer(e.currentTarget)}
+        style={{height: hauteurNette ? Math.min(h, hauteurNette) : 'auto', maxHeight:h, width:'auto', maxWidth:'100%',
+          objectFit:'contain', display: hauteurNette ? 'block' : 'none'}}/>
+    </>;
   }
   return <Bottle wine={wine} h={h} label={true}/>;
 }
@@ -2496,7 +2504,7 @@ function App() {
   // Mode connecté : si le catalogue a changé sur le serveur central, l'écran se
   // recharge, mais seulement entre deux clients (borne inactive), jamais pendant
   // une recherche. Vérifié à chaque remise à zéro (elle se répète toutes les
-  // 90 s tant que personne ne touche la borne), et au plus tard toutes les 5 minutes.
+  // 90 s tant que personne ne touche la borne), et au plus tard chaque minute.
   const verifierCatalogue = useCallback(() => {
     if (!window.WS_MODE_CONNECTE) return;
     fetch('/version').then(r => r.json()).then(v => {
@@ -2513,7 +2521,7 @@ function App() {
     try{ sessionStorage.removeItem('ws_age_ok'); }catch(e){}
     setAgeOk(false);
     verifierCatalogue();
-    if (window.WS_MODE_CONNECTE && !veilleRef.current) veilleRef.current = setInterval(verifierCatalogue, 5 * 60 * 1000);
+    if (window.WS_MODE_CONNECTE && !veilleRef.current) veilleRef.current = setInterval(verifierCatalogue, 60 * 1000);
   }, [verifierCatalogue]);
 
   useEffect(() => {
