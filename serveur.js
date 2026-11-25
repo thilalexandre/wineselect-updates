@@ -433,7 +433,7 @@ async function appelCentral(chemin, options) {
   const r = await fetch(CONNEXION.serveur + '/api/borne' + chemin, {
     method: o.corps ? 'POST' : 'GET',
     headers: Object.assign({ Authorization: 'Bearer ' + CONNEXION.jeton, 'X-WineSelect-Version': VERSION_BORNE },
-      o.corps ? { 'Content-Type': 'application/json' } : {}),
+      o.corps ? { 'Content-Type': 'application/json' } : {}, o.entetes || {}),
     body: o.corps ? JSON.stringify(o.corps) : undefined,
     signal: AbortSignal.timeout(o.delai || 15000),
   });
@@ -485,6 +485,15 @@ function bilanPhotos() {
   const presentes = attendues.filter(f => fs.existsSync(path.join(DOSSIER_PHOTOS, f))).length;
   return { attendues: attendues.length, presentes, enCours: photosEnCours, dernierEchec: ETAT_PHOTOS.dernierEchec };
 }
+// « 650/677 », suivi du dernier échec (ASCII seulement : en-tête HTTP).
+function resumePhotos() {
+  try {
+    const b = bilanPhotos(), e = b.dernierEchec;
+    return (b.presentes + '/' + b.attendues + (b.enCours ? ' en cours' : '') +
+      (e ? ' ; dernier echec ' + e.le.slice(0, 16) + 'Z ' + e.fichier + ' : ' + e.raison : ''))
+      .normalize('NFD').replace(/[^\x20-\x7e]/g, '').slice(0, 200);
+  } catch (err) { return 'inconnu'; }
+}
 async function telechargerPhoto(fichier) {
   if (!CONNEXION || !NOM_PHOTO.test(fichier)) return false;
   const r = await fetch(CONNEXION.serveur + '/api/borne/photos/' + encodeURIComponent(fichier), {
@@ -518,14 +527,18 @@ async function telechargerPhotosManquantes(vins) {
       .filter(p => p.startsWith(PREFIXE_PHOTO)).map(p => p.slice(PREFIXE_PHOTO.length)))]
       .filter(f => NOM_PHOTO.test(f) && !fs.existsSync(path.join(DOSSIER_PHOTOS, f)));
     // 4 téléchargements à la fois (25 nov. 2026 : 633 nouvelles photos d'un coup au Monoprix,
-    // une par une, laissaient des espaces vides plusieurs minutes) ; central injoignable : on reprendra.
-    let i = 0, arret = false;
+    // une par une, laissaient des espaces vides plusieurs minutes). Une photo trop lente ne
+    // bloque plus les autres : arrêt seulement après 8 échecs d'affilée (central injoignable),
+    // reprise à la synchronisation suivante.
+    let i = 0, echecsSuite = 0;
     await Promise.all(Array.from({ length: 4 }, async () => {
-      while (!arret && i < fichiers.length) {
+      while (echecsSuite < 8 && i < fichiers.length) {
         const f = fichiers[i++];
-        try { if (await telechargerPhoto(f)) recues++; } catch (e) {
+        try {
+          if (await telechargerPhoto(f)) { recues++; echecsSuite = 0; } else echecsSuite++;
+        } catch (e) {
           ETAT_PHOTOS.dernierEchec = { fichier: f, raison: e.message, le: new Date().toISOString() };
-          arret = true;
+          echecsSuite++;
         }
       }
     }));
@@ -547,7 +560,8 @@ app.get('/' + PREFIXE_PHOTO + ':fichier', async (req, res) => {
 
 async function synchroniser() {
   try {
-    const conf = await appelCentral('/config');
+    // État des photos joint à l'appel : visible du super admin (Magasins → bornes).
+    const conf = await appelCentral('/config', { entetes: { 'X-WineSelect-Photos': resumePhotos() } });
     if (conf.status !== 200 || !conf.corps) {
       throw new Error('HTTP ' + conf.status + (conf.corps && conf.corps.error ? ' — ' + conf.corps.error : ''));
     }
