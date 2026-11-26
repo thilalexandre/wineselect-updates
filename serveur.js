@@ -17,7 +17,16 @@ app.use(express.json({ limit: '10mb' }));
 //   serveur central ; la borne en garde une copie (cache-central/) et continue
 //   de proposer 3 vins sans Internet. Plus aucune clé Mistral sur la borne.
 //   (Variables WINESELECT_SERVEUR et WINESELECT_JETON : même effet, pour les tests.)
-const VERSION_BORNE = '2026.10';
+// Empreinte du code réellement installé (26 nov. 2026) : visible dans le back office
+// (version de chaque borne) pour vérifier qu'une mise à jour de nuit est bien passée.
+const EMPREINTE_CODE = (() => {
+  const h = crypto.createHash('sha256');
+  for (const f of ['WineSelect.html', 'serveur.js', 'sommelier.js', 'accords.js', 'profils-reference.js']) {
+    try { h.update(fs.readFileSync(path.join(__dirname, f))); } catch (e) { /* fichier absent */ }
+  }
+  return h.digest('hex').slice(0, 8);
+})();
+const VERSION_BORNE = '2026.10+' + EMPREINTE_CODE;
 // Dossier de borne-config.json et borne-jeton.txt (celui de la borne ; autre dossier pour les tests).
 const DOSSIER_BORNE = path.resolve(process.env.WINESELECT_DOSSIER_BORNE || __dirname);
 const FICHIER_CONFIG_BORNE = path.join(DOSSIER_BORNE, 'borne-config.json');
@@ -185,7 +194,7 @@ app.use((req, res, next) => {
     res.set('Cache-Control', 'no-store');
     res.send('// Catalogue du magasin, reçu du serveur central (version ' + ETAT_CENTRAL.versionCatalogue + ')\n' +
       'window.WS_MODE_CONNECTE = true;\n' +
-      'window.WS_VERSION_CATALOGUE = ' + JSON.stringify(ETAT_CENTRAL.versionCatalogue) + ';\n' +
+      'window.WS_VERSION_CATALOGUE = ' + JSON.stringify(versionEcran()) + ';\n' +
       'window.WINES_DATA = ' + JSON.stringify(BASE_CATALOG) + ';\n');
   });
   // L'administration se fait désormais dans l'espace de gestion en ligne :
@@ -449,6 +458,11 @@ function ecrireCache(fichier, donnees) {
   fs.renameSync(fichier + '.tmp', fichier);
 }
 
+// Version que l'écran compare à la sienne pour se recharger entre deux clients :
+// celle du catalogue, suivie de l'empreinte du code (mise à jour de nuit).
+function versionEcran() {
+  return ETAT_CENTRAL.versionCatalogue === null ? null : ETAT_CENTRAL.versionCatalogue + '+' + EMPREINTE_CODE;
+}
 function installerCatalogue(vins, version, source) {
   BASE_CATALOG = vins;
   WINES_CATALOG = SOMMELIER.avecLibelles(vins);
@@ -847,7 +861,8 @@ const server = app.listen(PORT, () => {
   console.log('   PID      : ' + process.pid);
   console.log('   Démarré  : ' + new Date().toLocaleString('fr-FR'));
   console.log('──────────────────────────────────\n');
-  if (CONNEXION) demarrerSynchro();
+  // Essai d'une nouvelle version (mise à jour de nuit) : ni synchronisation ni mise à jour.
+  if (CONNEXION && !ESSAI_MAJ) demarrerSynchro();
 });
 
 // Synchronisation avec le serveur central : tout de suite, puis chaque minute.
@@ -856,6 +871,139 @@ function demarrerSynchro() {
   synchroniser();
   if (!minuterieSynchro) minuterieSynchro = setInterval(() => { if (CONNEXION) synchroniser(); }, SYNCHRO_MS);
   minuterieSynchro.unref();
+}
+
+// ── Mise à jour de nuit (26 nov. 2026) ──────────────────────────────────────
+// Personne en magasin pour redémarrer la tablette : chaque nuit vers 4 h, la borne
+// lance check-update.js. Si des fichiers changent, la nouvelle version est d'abord
+// essayée à côté (écran compilé par Babel, serveur lancé sur un autre port, sans
+// synchronisation). Réussi : la borne s'arrête, INSTALLER.bat la relance (5 s) et
+// l'écran se recharge seul entre deux clients. Raté : retour aux fichiers d'avant,
+// sans redémarrer. Jamais sur un poste de développement (dossier .git), ni en
+// mode autonome, ni pendant un essai. Résultat : cache-central/maj-nuit.json et
+// écran de dépannage.
+const ESSAI_MAJ = process.env.WINESELECT_ESSAI_MAJ === '1';
+const HEURE_MAJ_NUIT = parseInt(process.env.WINESELECT_HEURE_MAJ || '4', 10);
+const FICHIER_MAJ_NUIT = path.join(DOSSIER_CACHE, 'maj-nuit.json');
+const DOSSIER_AVANT_MAJ = path.join(DOSSIER_CACHE, 'avant-maj');
+const ETAT_MAJ = (() => { try { return JSON.parse(fs.readFileSync(FICHIER_MAJ_NUIT, 'utf-8')); } catch (e) { return {}; } })();
+
+// Fichiers que check-update.js peut remplacer (lus dans sa liste FILES).
+function fichiersMisAJour() {
+  const texte = fs.readFileSync(path.join(__dirname, 'check-update.js'), 'utf-8');
+  const noms = new Set();
+  for (const m of texte.matchAll(/\b(?:name|cible):\s*'([^']+)'/g)) {
+    if (!m[1].includes('..') && !path.isAbsolute(m[1])) noms.add(m[1]);
+  }
+  return [...noms];
+}
+function empreinteFichier(f) {
+  try { return crypto.createHash('sha256').update(fs.readFileSync(path.join(__dirname, f))).digest('hex'); } catch (e) { return null; }
+}
+function lancer(commande, args, options, delaiMs) {
+  return new Promise((ok, ko) => {
+    require('child_process').execFile(commande, args, Object.assign({ cwd: __dirname, timeout: delaiMs, windowsHide: true, maxBuffer: 20 * 1024 * 1024 }, options),
+      (err, sortie, erreurs) => err ? ko(new Error(String(erreurs || '').trim().split('\n')[0] || err.message.split('\n')[0])) : ok(sortie));
+  });
+}
+
+// Renvoie null si la nouvelle version marche, sinon la raison.
+async function essayerNouvelleVersion() {
+  // 1. L'écran : le JSX doit se compiler (sinon « Script error » et écran blanc).
+  try {
+    const html = fs.readFileSync(path.join(__dirname, 'WineSelect.html'), 'utf-8');
+    const blocs = [...html.matchAll(/<script type="text\/babel">([\s\S]*?)<\/script>/g)].map(m => m[1]);
+    if (!blocs.length) return 'écran : aucun script trouvé';
+    // Compilation dans un processus à part (Babel pèse lourd) ; code passé par
+    // l'environnement, car la ligne de commande Windows abîme guillemets et barres obliques inverses.
+    const code = 'const B = require(process.env.WS_BABEL); const h = require("fs").readFileSync(process.env.WS_ECRAN, "utf-8");' +
+      'try { for (const bloc of h.split("<script type=\\"text/babel\\">").slice(1)) B.transform(bloc.split("</script>")[0], { presets: ["react"] }); }' +
+      ' catch (e) { console.error(String(e.message).split(String.fromCharCode(10))[0]); process.exit(1); }';
+    await lancer(process.execPath, ['-e', 'eval(process.env.WS_CODE)'], {
+      env: Object.assign({}, process.env, { WS_CODE: code, WS_BABEL: path.join(__dirname, 'vendor', 'babel.min.js'), WS_ECRAN: path.join(__dirname, 'WineSelect.html') }),
+    }, 120000);
+  } catch (e) { return 'écran : ' + e.message; }
+  // 2. Le serveur : il doit démarrer et servir l'écran.
+  const port = 3190 + Math.floor(Math.random() * 9);
+  const essai = require('child_process').spawn(process.execPath, ['serveur.js'], {
+    cwd: __dirname, stdio: 'ignore', windowsHide: true,
+    env: Object.assign({}, process.env, { PORT_BORNE: String(port), WINESELECT_ESSAI_MAJ: '1' }),
+  });
+  try {
+    const fin = Date.now() + 60000;
+    while (Date.now() < fin) {
+      if (essai.exitCode !== null) return 'serveur : arrêté au démarrage (code ' + essai.exitCode + ')';
+      try {
+        const v = await fetch('http://localhost:' + port + '/version', { signal: AbortSignal.timeout(3000) });
+        const ecran = await fetch('http://localhost:' + port + '/', { signal: AbortSignal.timeout(5000) });
+        if (v.status === 200 && ecran.status === 200 && (await ecran.text()).includes('text/babel')) return null;
+      } catch (e) { /* pas encore démarré */ }
+      await new Promise(r => setTimeout(r, 1000));
+    }
+    return 'serveur : pas de réponse en 60 s';
+  } finally { try { essai.kill(); } catch (e) {} }
+}
+
+let majEnCours = false;
+async function majDeNuit() {
+  if (majEnCours) return;
+  majEnCours = true;
+  const etat = { jour: new Date().toLocaleDateString('fr-CA'), le: new Date().toISOString() };
+  const avant = {};
+  const restaurer = changes => {
+    for (const f of changes) {
+      const p = path.join(__dirname, f);
+      if (avant[f] === null || avant[f] === undefined) { try { fs.unlinkSync(p); } catch (e) {} }
+      else fs.copyFileSync(path.join(DOSSIER_AVANT_MAJ, f), p);
+    }
+  };
+  const changesDepuis = () => [...new Set([...Object.keys(avant), ...fichiersMisAJour()])].filter(f => empreinteFichier(f) !== (avant[f] === undefined ? null : avant[f]));
+  try {
+    // Sans la boucle de relance d'INSTALLER.bat (bornes d'avant octobre 2026), s'arrêter
+    // laisserait l'écran sans serveur : on ne touche à rien.
+    let demarrage = '';
+    try { demarrage = fs.readFileSync(path.join(__dirname, 'INSTALLER.bat'), 'utf-8'); } catch (e) {}
+    if (!demarrage.includes(':boucleServeur')) { etat.resultat = 'impossible : INSTALLER.bat sans relance automatique'; return; }
+    fs.rmSync(DOSSIER_AVANT_MAJ, { recursive: true, force: true });
+    for (const f of fichiersMisAJour()) {
+      avant[f] = empreinteFichier(f);
+      if (avant[f] === null) continue;
+      fs.mkdirSync(path.dirname(path.join(DOSSIER_AVANT_MAJ, f)), { recursive: true });
+      fs.copyFileSync(path.join(__dirname, f), path.join(DOSSIER_AVANT_MAJ, f));
+    }
+    try { await lancer(process.execPath, ['check-update.js'], {}, 5 * 60 * 1000); }
+    catch (e) { throw new Error('check-update.js : ' + e.message); }
+    const changes = changesDepuis();
+    if (!changes.length) { etat.resultat = 'déjà à jour'; return; }
+    etat.fichiers = changes;
+    console.log('🌙 Mise à jour de nuit : ' + changes.join(', ') + ' — essai de la nouvelle version...');
+    const echec = await essayerNouvelleVersion();
+    if (echec) {
+      restaurer(changes);
+      etat.resultat = 'annulée, version précédente gardée';
+      etat.erreur = echec;
+      console.warn('⚠️  Mise à jour de nuit annulée (' + echec + ') : version précédente remise.');
+      return;
+    }
+    etat.resultat = 'installée';
+    console.log('🌙 Nouvelle version installée : redémarrage de la borne.');
+    setTimeout(() => process.exit(0), 1000); // INSTALLER.bat relance le serveur
+  } catch (e) {
+    etat.resultat = 'erreur, version précédente gardée';
+    etat.erreur = e.message;
+    try { restaurer(changesDepuis()); } catch (e2) { etat.erreur += ' ; retour impossible : ' + e2.message; }
+    console.warn('⚠️  Mise à jour de nuit : ' + e.message);
+  } finally {
+    Object.keys(ETAT_MAJ).forEach(k => delete ETAT_MAJ[k]);
+    Object.assign(ETAT_MAJ, etat);
+    try { ecrireCache(FICHIER_MAJ_NUIT, etat); } catch (e) {}
+    majEnCours = false;
+  }
+}
+if (!ESSAI_MAJ && !fs.existsSync(path.join(__dirname, '.git'))) {
+  setInterval(() => {
+    if (CONNEXION && new Date().getHours() === HEURE_MAJ_NUIT && ETAT_MAJ.jour !== new Date().toLocaleDateString('fr-CA')) majDeNuit();
+  }, (parseFloat(process.env.WINESELECT_MAJ_INTERVALLE_S) || 300) * 1000).unref();
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -899,6 +1047,7 @@ function etatBorne() {
     catalogue: { vins: WINES_CATALOG.length, version: CONNEXION ? ETAT_CENTRAL.versionCatalogue : null },
     synchro: CONNEXION ? { joignable: ETAT_CENTRAL.joignable, derniere: ETAT_CENTRAL.derniereSynchro, erreur: ETAT_CENTRAL.derniereErreur } : null,
     photos: bilanPhotos(),
+    majNuit: ETAT_MAJ,
     sommelier: CONNEXION ? 'serveur central' : (CONFIG.apiKey ? 'IA sur la borne' : 'sans IA'),
     codeDepannageDefini: codeDefini,
   };
@@ -1020,7 +1169,8 @@ app.get('/version', (req, res) => {
     mode: CONNEXION ? 'connecte' : 'autonome',
     // Mode connecté : l'écran compare cette version à la sienne pour se recharger
     // entre deux clients quand le catalogue a changé.
-    versionCatalogue: CONNEXION ? ETAT_CENTRAL.versionCatalogue : null,
+    // Catalogue + code : après une mise à jour de nuit, l'écran se recharge aussi.
+    versionCatalogue: CONNEXION ? versionEcran() : null,
     serveurCentral: CONNEXION ? {
       joignable: ETAT_CENTRAL.joignable, derniereSynchro: ETAT_CENTRAL.derniereSynchro,
       erreur: ETAT_CENTRAL.derniereErreur, magasin: ETAT_CENTRAL.magasin,
